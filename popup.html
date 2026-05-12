@@ -1,0 +1,54 @@
+<div id="lbgRoot" class="lbg-root">
+    <div class="lbg-header">
+        <div class="lbg-title-block">
+            <h3>Lorebook Gatekeeper</h3>
+            <div class="lbg-subtitle">Review activated Lorebook / World Info entries before sending the prompt.</div>
+        </div>
+
+        <div class="lbg-stats">
+            <div>Activated entries: <span id="lbgActiveCount">0</span></div>
+            <div>Inactive entries: <span id="lbgInactiveCount">0</span></div>
+            <div>Before: <span id="lbgBeforeTokens">0</span> tokens</div>
+            <div>Selected: <span id="lbgSelectedTokens">0</span> tokens</div>
+            <div>Added: <span id="lbgAddedTokens">0</span> tokens</div>
+            <div>Saved: <span id="lbgSavedTokens">0</span> tokens</div>
+        </div>
+    </div>
+
+    <div class="lbg-toolbar">
+        <input id="lbgSearch" class="text_pole" type="text" placeholder="Search by title, key, content, or book..." />
+
+        <select id="lbgSort" class="text_pole">
+            <option value="tokens_desc">Tokens: high to low</option>
+            <option value="tokens_asc">Tokens: low to high</option>
+            <option value="book">Book name</option>
+            <option value="title">Entry title</option>
+        </select>
+    </div>
+
+    <div class="lbg-actions">
+        <label class="lbg-inline-check">
+            <input id="lbgShowInactive" type="checkbox" checked />
+            <span>Show inactive entries for manual selection</span>
+        </label>
+
+        <div class="lbg-action-buttons">
+            <button id="lbgEnableAllActive" class="menu_button" type="button">Enable all active</button>
+            <button id="lbgDisableAllActive" class="menu_button" type="button">Disable all active</button>
+        </div>
+    </div>
+
+    <div class="lbg-section-header">
+        <h4>Activated entries</h4>
+        <span><span id="lbgActiveVisibleCount">0</span> visible</span>
+    </div>
+    <div id="lbgActiveEntries" class="lbg-list"></div>
+
+    <div id="lbgInactiveSection">
+        <div class="lbg-section-header">
+            <h4>Inactive entries</h4>
+            <span><span id="lbgInactiveVisibleCount">0</span> visible</span>
+        </div>
+        <div id="lbgInactiveEntries" class="lbg-list"></div>
+    </div>
+</div>
