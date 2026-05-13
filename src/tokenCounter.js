@@ -1,15 +1,9 @@
+import { getContext } from '../../../../extensions.js';
+import { getTokenCountAsync as getTokenCountAsyncDirect } from '../../../../tokenizers.js';
 import { TOKEN_CACHE_KEY } from './constants.js';
 
 export async function addTokenCounts(entries) {
-    const context = SillyTavern.getContext();
-
-    if (typeof context.getTokenCountAsync !== 'function') {
-        entries.forEach((entry) => {
-            entry.tokens = estimateTokens(entry.content);
-        });
-        return entries;
-    }
-
+    const tokenCounter = getTokenCounter();
     const cache = readTokenCache();
     let changed = false;
 
@@ -22,7 +16,7 @@ export async function addTokenCounts(entries) {
         }
 
         try {
-            entry.tokens = await context.getTokenCountAsync(entry.content);
+            entry.tokens = typeof tokenCounter === 'function' ? await tokenCounter(entry.content) : estimateTokens(entry.content);
         } catch (error) {
             console.warn(`Lorebook Gatekeeper: token count failed for ${entry.id}.`, error);
             entry.tokens = estimateTokens(entry.content);
@@ -32,28 +26,38 @@ export async function addTokenCounts(entries) {
         changed = true;
     }
 
-    if (changed) {
-        writeTokenCache(cache);
-    }
-
+    if (changed) writeTokenCache(cache);
     return entries;
 }
 
 export function buildTokenStats(activeEntries, inactiveEntries = []) {
     const activeTokens = sumTokens(activeEntries);
     const inactiveTokens = sumTokens(inactiveEntries);
-
-    return {
-        activeCount: activeEntries.length,
-        inactiveCount: inactiveEntries.length,
-        activeTokens,
-        inactiveTokens,
-        totalKnownTokens: activeTokens + inactiveTokens,
-    };
+    return { activeCount: activeEntries.length, inactiveCount: inactiveEntries.length, activeTokens, inactiveTokens, totalKnownTokens: activeTokens + inactiveTokens };
 }
 
 export function sumTokens(entries) {
     return entries.reduce((sum, entry) => sum + Number(entry.tokens || 0), 0);
+}
+
+function getTokenCounter() {
+    try {
+        const context = typeof getContext === 'function' ? getContext() : null;
+        if (typeof context?.getTokenCountAsync === 'function') return context.getTokenCountAsync.bind(context);
+    } catch (error) {
+        console.warn('Lorebook Gatekeeper: context token counter unavailable.', error);
+    }
+
+    if (typeof getTokenCountAsyncDirect === 'function') return getTokenCountAsyncDirect;
+
+    try {
+        const context = globalThis.SillyTavern?.getContext?.();
+        if (typeof context?.getTokenCountAsync === 'function') return context.getTokenCountAsync.bind(context);
+    } catch (error) {
+        console.warn('Lorebook Gatekeeper: global token counter unavailable.', error);
+    }
+
+    return null;
 }
 
 function estimateTokens(text) {
@@ -67,12 +71,10 @@ function buildCacheKey(entry) {
 function hashString(value) {
     let hash = 0;
     const text = String(value || '');
-
     for (let i = 0; i < text.length; i += 1) {
         hash = ((hash << 5) - hash) + text.charCodeAt(i);
         hash |= 0;
     }
-
     return String(hash);
 }
 
@@ -90,11 +92,7 @@ function writeTokenCache(cache) {
         const keys = Object.keys(cache);
         const trimmed = {};
         const maxItems = 5000;
-
-        for (const key of keys.slice(Math.max(0, keys.length - maxItems))) {
-            trimmed[key] = cache[key];
-        }
-
+        for (const key of keys.slice(Math.max(0, keys.length - maxItems))) trimmed[key] = cache[key];
         localStorage.setItem(TOKEN_CACHE_KEY, JSON.stringify(trimmed));
     } catch (error) {
         console.warn('Lorebook Gatekeeper: failed to write token cache.', error);

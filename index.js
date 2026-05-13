@@ -4,7 +4,7 @@ import { findActiveEntries, splitActiveAndInactive } from './src/activationMatch
 import { collectWorldInfoEntries } from './src/worldInfoCollector.js';
 import { addTokenCounts, buildTokenStats } from './src/tokenCounter.js';
 import { getSettings, saveSettings } from './src/settings.js';
-import { isChatCompletionMode, getPromptTextFromChat } from './src/promptAdapter.js';
+import { getPromptTextFromChat } from './src/promptAdapter.js';
 import {
     injectManualEntriesIntoChat,
     injectManualEntriesIntoTextPrompt,
@@ -42,20 +42,16 @@ function addLaunchButton() {
     }
 
     updateButtonView();
-
     launchButton.appendChild(icon);
     launchButton.appendChild(textSpan);
 
-    const extensionsMenu = document.getElementById('prompt_inspector_wand_container')
-        ?? document.getElementById('extensionsMenu');
+    const extensionsMenu = document.getElementById('prompt_inspector_wand_container') ?? document.getElementById('extensionsMenu');
 
     if (!extensionsMenu) {
         console.warn(`${MODULE_NAME}: extensions menu was not found. Toggle button was not added.`);
         return;
     }
 
-    extensionsMenu.classList.add('interactable');
-    extensionsMenu.tabIndex = 0;
     extensionsMenu.appendChild(launchButton);
 
     launchButton.addEventListener('click', () => {
@@ -66,63 +62,44 @@ function addLaunchButton() {
     });
 }
 
-async function reviewPrompt(promptText) {
+function isLikelyChatCompletionMode() {
+    return String(main_api || '').toLowerCase() === 'openai';
+}
+
+async function reviewPrompt(promptText, options = {}) {
     const allEntries = await collectWorldInfoEntries();
     const activeEntries = findActiveEntries(allEntries, promptText);
     const { inactiveEntries } = splitActiveAndInactive(allEntries, activeEntries);
 
+    if (options.skipWhenNoActive && activeEntries.length === 0 && !settings.showManualOnlyWhenNoActive) {
+        console.debug(`${MODULE_NAME}: skipped preliminary prompt review because no active Lorebook entries were detected.`);
+        return { action: 'discard', disabledEntries: [], manualEntries: [] };
+    }
+
     await addTokenCounts(activeEntries);
 
-    if (settings.countInactiveTokens) {
-        await addTokenCounts(inactiveEntries);
-    }
+    if (settings.countInactiveTokens) await addTokenCounts(inactiveEntries);
 
     const statsBefore = buildTokenStats(activeEntries, inactiveEntries);
 
-    const result = await showLorebookReviewPopup({
-        activeEntries,
-        inactiveEntries,
-        statsBefore,
-        settings,
-    });
-
+    const result = await showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings });
     saveSettings(settings);
     return result;
 }
 
 async function handleReviewResult(result, applyChanges) {
-    if (!result || result.action === 'discard') {
-        return;
-    }
+    if (!result || result.action === 'discard') return;
 
     if (result.action === 'cancel') {
         await stopGeneration();
         return;
     }
 
-    if (result.action === 'confirm') {
-        applyChanges(result);
-    }
+    if (result.action === 'confirm') applyChanges(result);
 }
 
 eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
-    if (!settings.enabled) {
-        return;
-    }
-
-    if (data.dryRun) {
-        console.debug(`${MODULE_NAME}: skipping dry run chat completion prompt.`);
-        return;
-    }
-
-    if (!isChatCompletionMode(main_api)) {
-        return;
-    }
-
-    if (!Array.isArray(data.chat)) {
-        console.warn(`${MODULE_NAME}: chat completion payload does not contain data.chat array.`);
-        return;
-    }
+    if (!settings.enabled || data.dryRun || !Array.isArray(data.chat)) return;
 
     try {
         const promptText = getPromptTextFromChat(data.chat);
@@ -140,26 +117,15 @@ eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
 });
 
 eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
-    if (!settings.enabled) {
-        return;
-    }
+    if (!settings.enabled || data.dryRun || typeof data.prompt !== 'string') return;
 
-    if (data.dryRun) {
-        console.debug(`${MODULE_NAME}: skipping dry run text completion prompt.`);
-        return;
-    }
-
-    if (isChatCompletionMode(main_api)) {
-        return;
-    }
-
-    if (typeof data.prompt !== 'string') {
-        console.warn(`${MODULE_NAME}: text completion payload does not contain data.prompt string.`);
+    if (isLikelyChatCompletionMode()) {
+        console.debug(`${MODULE_NAME}: skipped GENERATE_AFTER_COMBINE_PROMPTS because CHAT_COMPLETION_PROMPT_READY will handle this generation.`);
         return;
     }
 
     try {
-        const result = await reviewPrompt(data.prompt);
+        const result = await reviewPrompt(data.prompt, { skipWhenNoActive: true });
 
         await handleReviewResult(result, ({ disabledEntries, manualEntries }) => {
             data.prompt = removeEntriesFromTextPrompt(data.prompt, disabledEntries);
@@ -175,5 +141,5 @@ eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
 (function init() {
     validateRequiredEvents();
     addLaunchButton();
-    console.log(`${MODULE_NAME}: initialized.`);
+    console.log(`${MODULE_NAME}: initialized. main_api=${main_api}`);
 })();

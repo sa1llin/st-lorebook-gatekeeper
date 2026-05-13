@@ -7,21 +7,13 @@ export const defaultSettings = {
     maxPreviewLength: 500,
     sortMode: 'tokens_desc',
     countInactiveTokens: true,
-    renderInactiveWithoutSearch: true,
+    showManualOnlyWhenNoActive: false,
 };
 
 export function getSettings() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-
-        if (!raw) {
-            return cloneDefaultSettings();
-        }
-
-        return {
-            ...cloneDefaultSettings(),
-            ...JSON.parse(raw),
-        };
+        return raw ? { ...cloneDefaultSettings(), ...JSON.parse(raw) } : cloneDefaultSettings();
     } catch (error) {
         console.warn('Lorebook Gatekeeper: failed to read settings, using defaults.', error);
         return cloneDefaultSettings();
@@ -32,6 +24,6 @@ export function saveSettings(settings) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
-export function cloneDefaultSettings() {
+function cloneDefaultSettings() {
     return JSON.parse(JSON.stringify(defaultSettings));
 }

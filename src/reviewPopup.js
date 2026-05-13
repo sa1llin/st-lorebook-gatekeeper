@@ -2,77 +2,122 @@ import { renderExtensionTemplateAsync } from '../../../../extensions.js';
 import { POPUP_TYPE, Popup } from '../../../../popup.js';
 import { CANCEL_GENERATION_RESULT, EXTENSION_PATH, MAX_RENDERED_ENTRIES } from './constants.js';
 import { sumTokens } from './tokenCounter.js';
+import {
+    applyRememberedChoiceToState,
+    clearRememberedChoice,
+    formatRememberedChoiceInfo,
+    loadRememberedChoice,
+    saveRememberedChoiceFromState,
+} from './choiceMemory.js';
 
-export async function showLorebookReviewPopup({
-    activeEntries,
-    inactiveEntries,
-    statsBefore,
-    settings,
-}) {
+export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings }) {
     const template = $(await renderExtensionTemplateAsync(EXTENSION_PATH, 'popup'));
 
     const state = {
-        activeEntries: activeEntries.map((entry) => ({
-            ...entry,
-            selected: true,
-            originallyActive: true,
-        })),
-        inactiveEntries: inactiveEntries.map((entry) => ({
-            ...entry,
-            selected: false,
-            originallyActive: false,
-        })),
+        activeEntries: activeEntries.map((entry) => ({ ...entry, selected: true, originallyActive: true })),
+        inactiveEntries: inactiveEntries.map((entry) => ({ ...entry, selected: false, originallyActive: false })),
         settings,
+        statsBefore,
+        rememberedChoice: loadRememberedChoice(),
     };
 
     initializeControls(template, state);
     renderLists(template, state);
-    updateStats(template, state, statsBefore);
+    updateStats(template, state);
 
-    let popup;
     const cancelGenerationButton = {
         text: 'Cancel generation',
         result: CANCEL_GENERATION_RESULT,
         appendAtEnd: true,
-        action: async () => {
-            await popup.complete(CANCEL_GENERATION_RESULT);
-        },
     };
 
-    popup = new Popup(template, POPUP_TYPE.CONFIRM, '', {
-        wide: true,
-        large: true,
-        okButton: 'Confirm changes',
-        cancelButton: 'Send without changes',
-        customButtons: [cancelGenerationButton],
-    });
+    const popupResult = await showReviewDialog(template, cancelGenerationButton);
 
-    const popupResult = await popup.show();
+    if (popupResult === CANCEL_GENERATION_RESULT) return { action: 'cancel', disabledEntries: [], manualEntries: [] };
+    if (!popupResult) return { action: 'discard', disabledEntries: [], manualEntries: [] };
 
-    if (popupResult === CANCEL_GENERATION_RESULT) {
-        return {
-            action: 'cancel',
-            disabledEntries: [],
-            manualEntries: [],
-        };
-    }
-
-    if (!popupResult) {
-        return {
-            action: 'discard',
-            disabledEntries: [],
-            manualEntries: [],
-        };
+    if (Boolean(template.find('#lbgRememberChoice').prop('checked'))) {
+        state.rememberedChoice = saveRememberedChoiceFromState(state);
     }
 
     const disabledEntries = state.activeEntries.filter((entry) => !entry.selected);
     const manualEntries = state.inactiveEntries.filter((entry) => entry.selected);
 
-    return {
-        action: 'confirm',
-        disabledEntries,
-        manualEntries,
-    };
+    return { action: 'confirm', disabledEntries, manualEntries };
+}
+
+function shouldUseMobileOverlay() {
+    return window.matchMedia?.('(max-width: 768px), (pointer: coarse)')?.matches || window.innerWidth <= 768;
+}
+
+async function showReviewDialog(template, cancelGenerationButton) {
+    if (shouldUseMobileOverlay()) return await showMobileReviewOverlay(template, cancelGenerationButton);
+
+    try {
+        const popup = new Popup(template, POPUP_TYPE.CONFIRM, '', {
+            wide: true,
+            large: true,
+            okButton: 'Confirm changes',
+            cancelButton: 'Send without changes',
+            customButtons: [cancelGenerationButton],
+        });
+
+        return await popup.show();
+    } catch (error) {
+        console.warn('Lorebook Gatekeeper: default Popup failed, falling back to mobile overlay.', error);
+        return await showMobileReviewOverlay(template, cancelGenerationButton);
+    }
+}
+
+function showMobileReviewOverlay(template, cancelGenerationButton) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'lbg-mobile-overlay';
+
+        const panel = document.createElement('div');
+        panel.className = 'lbg-mobile-panel';
+
+        const body = document.createElement('div');
+        body.className = 'lbg-mobile-body';
+        body.appendChild(template[0]);
+
+        const footer = document.createElement('div');
+        footer.className = 'lbg-mobile-footer';
+
+        const cancelGeneration = document.createElement('button');
+        cancelGeneration.type = 'button';
+        cancelGeneration.className = 'menu_button lbg-mobile-button lbg-mobile-danger';
+        cancelGeneration.textContent = cancelGenerationButton.text || 'Cancel generation';
+
+        const discard = document.createElement('button');
+        discard.type = 'button';
+        discard.className = 'menu_button lbg-mobile-button';
+        discard.textContent = 'Send without changes';
+
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = 'menu_button lbg-mobile-button lbg-mobile-primary';
+        confirm.textContent = 'Confirm changes';
+
+        footer.appendChild(cancelGeneration);
+        footer.appendChild(discard);
+        footer.appendChild(confirm);
+        panel.appendChild(body);
+        panel.appendChild(footer);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        document.body.classList.add('lbg-mobile-open');
+
+        const cleanup = (result) => {
+            document.body.classList.remove('lbg-mobile-open');
+            overlay.remove();
+            resolve(result);
+        };
+
+        cancelGeneration.addEventListener('click', () => cleanup(CANCEL_GENERATION_RESULT), { once: true });
+        discard.addEventListener('click', () => cleanup(false), { once: true });
+        confirm.addEventListener('click', () => cleanup(true), { once: true });
+    });
 }
 
 function initializeControls(template, state) {
@@ -96,21 +141,48 @@ function initializeControls(template, state) {
         updateStats(template, state);
     });
 
+    template.find('#lbgApplyRememberedChoice').on('click', () => {
+        state.rememberedChoice = loadRememberedChoice();
+
+        if (!state.rememberedChoice) {
+            toastr.info('Lorebook Gatekeeper: no remembered choice to apply.');
+            updateMemoryInfo(template, state);
+            return;
+        }
+
+        applyRememberedChoiceToState(state, state.rememberedChoice);
+        renderLists(template, state);
+        updateStats(template, state);
+        updateMemoryInfo(template, state);
+        toastr.success('Lorebook Gatekeeper: remembered choice applied.');
+    });
+
+    template.find('#lbgClearRememberedChoice').on('click', () => {
+        clearRememberedChoice();
+        state.rememberedChoice = null;
+        updateMemoryInfo(template, state);
+        toastr.info('Lorebook Gatekeeper: remembered choice cleared.');
+    });
+
+    updateMemoryInfo(template, state);
+
     template.find('#lbgDisableAllActive').on('click', () => {
-        state.activeEntries.forEach((entry) => {
-            entry.selected = false;
-        });
+        state.activeEntries.forEach((entry) => { entry.selected = false; });
         renderLists(template, state);
         updateStats(template, state);
     });
 
     template.find('#lbgEnableAllActive').on('click', () => {
-        state.activeEntries.forEach((entry) => {
-            entry.selected = true;
-        });
+        state.activeEntries.forEach((entry) => { entry.selected = true; });
         renderLists(template, state);
         updateStats(template, state);
     });
+}
+
+function updateMemoryInfo(template, state) {
+    template.find('#lbgRememberedChoiceInfo').text(formatRememberedChoiceInfo(state.rememberedChoice));
+    template.find('#lbgApplyRememberedChoice').prop('disabled', !state.rememberedChoice);
+    template.find('#lbgClearRememberedChoice').prop('disabled', !state.rememberedChoice);
 }
 
 function renderLists(template, state) {
@@ -137,9 +209,7 @@ function renderLists(template, state) {
         renderEntrySet(inactiveContainer, visibleInactive, state, template);
 
         if (inactiveEntries.length > MAX_RENDERED_ENTRIES) {
-            inactiveContainer.append(createNoticeElement(
-                `Showing ${MAX_RENDERED_ENTRIES} of ${inactiveEntries.length} inactive entries. Use search to narrow the list.`
-            ));
+            inactiveContainer.append(createNoticeElement(`Showing ${MAX_RENDERED_ENTRIES} of ${inactiveEntries.length} inactive entries. Use search to narrow the list.`));
         }
     }
 
@@ -228,7 +298,7 @@ function createNoticeElement(text) {
     return element;
 }
 
-function updateStats(template, state, statsBefore = null) {
+function updateStats(template, state) {
     const selectedActive = state.activeEntries.filter((entry) => entry.selected);
     const disabledActive = state.activeEntries.filter((entry) => !entry.selected);
     const selectedManual = state.inactiveEntries.filter((entry) => entry.selected);
@@ -241,10 +311,7 @@ function updateStats(template, state, statsBefore = null) {
     template.find('#lbgSelectedTokens').text(selectedTokens);
     template.find('#lbgSavedTokens').text(savedTokens);
     template.find('#lbgAddedTokens').text(addedTokens);
-
-    if (statsBefore) {
-        template.find('#lbgBeforeTokens').text(statsBefore.activeTokens || 0);
-    }
+    template.find('#lbgBeforeTokens').text(state.statsBefore?.activeTokens || 0);
 }
 
 function filterAndSortEntries(entries, query, sortMode) {
@@ -252,14 +319,7 @@ function filterAndSortEntries(entries, query, sortMode) {
 
     if (query) {
         result = result.filter((entry) => {
-            const haystack = [
-                entry.title,
-                entry.bookName,
-                entry.content,
-                ...(entry.keys || []),
-                ...(entry.secondaryKeys || []),
-            ].join(' ').toLowerCase();
-
+            const haystack = [entry.title, entry.bookName, entry.content, ...(entry.keys || []), ...(entry.secondaryKeys || [])].join(' ').toLowerCase();
             return haystack.includes(query);
         });
     }

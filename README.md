@@ -1,113 +1,53 @@
 # Lorebook Gatekeeper for SillyTavern
 
-Расширение для SillyTavern, которое показывает активированные Lorebook / World Info записи перед отправкой промта на сервер и позволяет временно отключить лишние записи или вручную добавить неактивированные.
-
-## Что делает расширение
-
-- Перехватывает готовый промт перед отправкой.
-- Показывает активированные World Info / Lorebook записи.
-- Показывает записи из нескольких лорбуков одновременно.
-- Позволяет отключить активированные записи только для текущей генерации.
-- Позволяет вручную добавить неактивированные записи.
-- Показывает примерный расход токенов по записям.
-- Работает без изменения ядра SillyTavern.
-- Изменения не сохраняются в лорбуки и не меняют историю чата.
+Расширение показывает активированные Lorebook / World Info записи перед отправкой промта на сервер и позволяет временно отключить лишние записи или вручную добавить неактивированные.
 
 ## Установка
 
-1. Распакуйте папку `st-lorebook-gatekeeper` в директорию:
+1. Удалите старую папку расширения:
+
+```text
+SillyTavern/public/scripts/extensions/third-party/st-lorebook-gatekeeper
+```
+
+2. Распакуйте новую папку `st-lorebook-gatekeeper` сюда:
 
 ```text
 SillyTavern/public/scripts/extensions/third-party/
 ```
 
-Итоговый путь должен быть:
+3. Перезапустите SillyTavern.
+
+4. Очистите кэш браузера или выполните жесткое обновление.
+
+## v0.1.4
+
+Исправлена ошибка загрузки на мобильном/удалённом frontend:
 
 ```text
-SillyTavern/public/scripts/extensions/third-party/st-lorebook-gatekeeper/
+GET /scripts/script.js 404
+Extension "Lorebook Gatekeeper" failed to load
 ```
 
-2. Перезапустите SillyTavern или обновите страницу браузера.
+Причина: файл `src/worldInfoCollector.js` находился на один уровень глубже, поэтому путь `../../../../script.js` превращался в `/scripts/script.js`. Теперь используется правильный путь `../../../../../script.js`, который ведёт к `/script.js`.
 
-3. В меню расширений появится кнопка:
+## Возможности
 
-```text
-Lorebook Gatekeeper: ON / OFF
-```
+- Перехват готового промта перед отправкой.
+- Поддержка Chat Completion и Text Completion payload.
+- Работа без изменения ядра SillyTavern.
+- Отдельный fullscreen overlay для мобильных браузеров.
+- Загрузка лорбуков через несколько fallback-источников.
+- Подсчёт токенов с fallback-оценкой.
 
-## Как работает
 
-Расширение использует те же точки перехвата, что и Prompt Inspector:
+## v0.1.5
 
-- `CHAT_COMPLETION_PROMPT_READY` для Chat Completion API;
-- `GENERATE_AFTER_COMBINE_PROMPTS` для Text Completion API.
-
-После формирования промта расширение:
-
-1. Загружает доступные World Info / Lorebook книги.
-2. Сравнивает содержимое записей с готовым промтом.
-3. Находит активированные записи.
-4. Показывает popup с выбором.
-5. Удаляет отключённые записи из текущего outgoing prompt.
-6. Добавляет выбранные вручную записи отдельным блоком.
-
-## Ограничения MVP
-
-Так как расширение не изменяет ядро SillyTavern, оно не получает внутренний список активированных записей напрямую из World Info engine. Активированные записи определяются по наличию `content` записи в готовом промте.
-
-Это означает:
-
-- если запись была сильно изменена макросами, она может не распознаться;
-- если запись была обрезана контекстом, она может не распознаться;
-- ручные записи добавляются отдельным системным блоком;
-- отключение действует только на текущую генерацию.
-
-## Структура проекта
-
-```text
-st-lorebook-gatekeeper/
-├── manifest.json
-├── index.js
-├── popup.html
-├── style.css
-├── README.md
-└── src/
-    ├── activationMatcher.js
-    ├── constants.js
-    ├── promptAdapter.js
-    ├── promptPatcher.js
-    ├── reviewPopup.js
-    ├── settings.js
-    ├── tokenCounter.js
-    └── worldInfoCollector.js
-```
-
-## Назначение файлов
-
-- `manifest.json` — описание расширения для SillyTavern.
-- `index.js` — точка входа, подписка на события готового промта.
-- `popup.html` — шаблон окна выбора записей.
-- `style.css` — стили интерфейса.
-- `worldInfoCollector.js` — загрузка и нормализация лорбуков.
-- `activationMatcher.js` — поиск записей, которые уже попали в промт.
-- `tokenCounter.js` — подсчёт и кэширование токенов.
-- `promptPatcher.js` — удаление и добавление записей в текущий промт.
-- `reviewPopup.js` — логика UI окна.
-- `settings.js` — локальные настройки расширения.
-- `promptAdapter.js` — адаптация Chat Completion / Text Completion промтов.
-
-## Режим разработки
-
-Рекомендуемый порядок тестирования:
-
-1. Установить расширение.
-2. Открыть браузерную консоль.
-3. Включить `Lorebook Gatekeeper: ON`.
-4. Отправить сообщение, которое активирует World Info.
-5. Проверить, что popup показывает активные записи.
-6. Отключить одну запись и подтвердить.
-7. Проверить, что ответ модели сгенерирован без выбранной записи.
-
-## Версия
-
-`0.1.0` — MVP без изменения ядра SillyTavern.
+- Removed duplicate popup behavior for Chat Completion flow: preliminary text-prompt review is skipped when Chat Completion review will handle the generation.
+- Added a fallback skip for preliminary prompt review when no active Lorebook entries are detected.
+- Updated palette: main background `#171717`, entry/text background `#101010`, text color `#dcddd8`.
+- Added remembered choice memory:
+  - `Remember my choice after confirmation`;
+  - `Apply remembered choice`;
+  - `Clear remembered choice`.
+- Remembered choice stores disabled active entries and manually selected inactive entries in browser localStorage.
