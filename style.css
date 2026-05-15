@@ -341,3 +341,69 @@ body.lbg-mobile-open {
     background: #171717 !important;
     color: #dcddd8 !important;
 }
+
+/* v0.1.6: white checkbox ticks and inactive lorebook selector. */
+.lbg-root input[type="checkbox"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    min-width: 16px;
+    height: 16px;
+    margin: 0;
+    border: 1px solid #dcddd8 !important;
+    border-radius: 4px;
+    background: #101010 !important;
+    cursor: pointer;
+}
+
+.lbg-root input[type="checkbox"]:checked::after {
+    content: "✓";
+    position: absolute;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+    transform: translateY(-1px);
+}
+
+.lbg-root input[type="checkbox"]:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+}
+
+.lbg-root input[type="checkbox"]:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.lbg-book-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 8px 0;
+}
+
+.lbg-book-filter-row label {
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+#lbgInactiveBookFilter {
+    min-width: 220px;
+    max-width: 100%;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+    .lbg-book-filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #lbgInactiveBookFilter {
+        width: 100%;
+        min-width: 0;
+    }
+}

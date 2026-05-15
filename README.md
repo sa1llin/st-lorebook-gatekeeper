@@ -51,3 +51,10 @@ Extension "Lorebook Gatekeeper" failed to load
   - `Apply remembered choice`;
   - `Clear remembered choice`.
 - Remembered choice stores disabled active entries and manually selected inactive entries in browser localStorage.
+
+
+## v0.1.6
+
+- Changed custom checkbox rendering so selected ticks are white instead of black.
+- Added an inactive lorebook filter: inactive entries can now be shown from all lorebooks or from one selected lorebook.
+- Current manual selections are preserved while switching the inactive lorebook filter.

@@ -19,6 +19,7 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
         settings,
         statsBefore,
         rememberedChoice: loadRememberedChoice(),
+        inactiveBookFilter: '__all__',
     };
 
     initializeControls(template, state);
@@ -123,6 +124,7 @@ function showMobileReviewOverlay(template, cancelGenerationButton) {
 function initializeControls(template, state) {
     template.find('#lbgSort').val(state.settings.sortMode || 'tokens_desc');
     template.find('#lbgShowInactive').prop('checked', Boolean(state.settings.showInactiveEntries));
+    populateInactiveBookFilter(template, state);
 
     template.find('#lbgSearch').on('input', () => {
         renderLists(template, state);
@@ -137,6 +139,12 @@ function initializeControls(template, state) {
 
     template.find('#lbgShowInactive').on('change', () => {
         state.settings.showInactiveEntries = Boolean(template.find('#lbgShowInactive').prop('checked'));
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    template.find('#lbgInactiveBookFilter').on('change', () => {
+        state.inactiveBookFilter = String(template.find('#lbgInactiveBookFilter').val() || '__all__');
         renderLists(template, state);
         updateStats(template, state);
     });
@@ -179,6 +187,41 @@ function initializeControls(template, state) {
     });
 }
 
+
+function populateInactiveBookFilter(template, state) {
+    const select = template.find('#lbgInactiveBookFilter');
+    const bookNames = getUniqueBookNames(state.inactiveEntries);
+
+    select.empty();
+    select.append(createOption('__all__', 'All lorebooks'));
+
+    for (const bookName of bookNames) {
+        select.append(createOption(bookName, bookName));
+    }
+
+    select.val(state.inactiveBookFilter || '__all__');
+}
+
+function createOption(value, text) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = text;
+    return option;
+}
+
+function getUniqueBookNames(entries) {
+    return [...new Set(entries.map((entry) => String(entry.bookName || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+}
+
+function filterInactiveEntriesByBook(entries, selectedBookName) {
+    if (!selectedBookName || selectedBookName === '__all__') {
+        return entries;
+    }
+
+    return entries.filter((entry) => entry.bookName === selectedBookName);
+}
+
 function updateMemoryInfo(template, state) {
     template.find('#lbgRememberedChoiceInfo').text(formatRememberedChoiceInfo(state.rememberedChoice));
     template.find('#lbgApplyRememberedChoice').prop('disabled', !state.rememberedChoice);
@@ -198,7 +241,10 @@ function renderLists(template, state) {
     inactiveContainer.empty();
 
     const activeEntries = filterAndSortEntries(state.activeEntries, query, sortMode);
-    const inactiveEntries = filterAndSortEntries(state.inactiveEntries, query, sortMode);
+    const inactiveEntries = filterInactiveEntriesByBook(
+        filterAndSortEntries(state.inactiveEntries, query, sortMode),
+        state.inactiveBookFilter,
+    );
 
     renderEntrySet(activeContainer, activeEntries, state, template);
 
