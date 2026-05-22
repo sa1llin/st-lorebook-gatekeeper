@@ -8,12 +8,13 @@ export const defaultSettings = {
     sortMode: 'tokens_desc',
     countInactiveTokens: true,
     showManualOnlyWhenNoActive: false,
+    preferredInactiveBookNames: [],
 };
 
 export function getSettings() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? { ...cloneDefaultSettings(), ...JSON.parse(raw) } : cloneDefaultSettings();
+        return normalizeSettings(raw ? { ...cloneDefaultSettings(), ...JSON.parse(raw) } : cloneDefaultSettings());
     } catch (error) {
         console.warn('Lorebook Gatekeeper: failed to read settings, using defaults.', error);
         return cloneDefaultSettings();
@@ -21,7 +22,17 @@ export function getSettings() {
 }
 
 export function saveSettings(settings) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+}
+
+function normalizeSettings(settings) {
+    const normalized = { ...cloneDefaultSettings(), ...(settings || {}) };
+    normalized.preferredInactiveBookNames = toStringArray(normalized.preferredInactiveBookNames);
+    return normalized;
+}
+
+function toStringArray(value) {
+    return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
 }
 
 function cloneDefaultSettings() {

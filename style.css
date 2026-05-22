@@ -54,7 +54,9 @@
     align-items: center;
 }
 
-.lbg-action-buttons {
+.lbg-action-buttons,
+.lbg-memory-actions,
+.lbg-priority-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
@@ -125,12 +127,17 @@
 }
 
 .lbg-book-badge,
+.lbg-source-badge,
 .lbg-token-badge,
 .lbg-match-badge {
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 999px;
     padding: 2px 8px;
     white-space: nowrap;
+}
+
+.lbg-source-badge {
+    opacity: 0.85;
 }
 
 .lbg-keys {
@@ -154,6 +161,67 @@
     border: 1px dashed var(--SmartThemeBorderColor);
     border-radius: 8px;
     opacity: 0.8;
+}
+
+.lbg-memory-panel,
+.lbg-priority-panel {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--SmartThemeBlurTintColor);
+}
+
+.lbg-memory-info,
+.lbg-priority-hint {
+    opacity: 0.82;
+    font-size: 0.88em;
+}
+
+.lbg-book-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 2px 0 8px 0;
+}
+
+.lbg-book-filter-row label {
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+#lbgInactiveBookFilter {
+    min-width: 220px;
+    max-width: 100%;
+}
+
+.lbg-priority-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.lbg-book-choice-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-height: 120px;
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.lbg-book-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
 }
 
 body.lbg-mobile-open {
@@ -214,46 +282,6 @@ body.lbg-mobile-open {
     opacity: 0.9;
 }
 
-@media (max-width: 768px), (pointer: coarse) {
-    .lbg-root {
-        min-height: auto;
-        height: auto;
-        gap: 10px;
-    }
-
-    .lbg-header,
-    .lbg-toolbar,
-    .lbg-actions,
-    .lbg-section-header,
-    .lbg-entry-top {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .lbg-stats {
-        min-width: 0;
-        width: auto;
-    }
-
-    .lbg-list {
-        max-height: none;
-        overflow: visible;
-    }
-
-    .lbg-preview {
-        max-height: 160px;
-        font-size: 0.85em;
-    }
-
-    .lbg-entry-meta {
-        font-size: 0.82em;
-    }
-
-    .lbg-token-badge {
-        align-self: flex-start;
-    }
-}
-
 /* Custom dark palette requested for Lorebook Gatekeeper. */
 .lbg-root,
 .lbg-mobile-panel,
@@ -271,6 +299,8 @@ body.lbg-mobile-open {
 .lbg-preview,
 .lbg-notice,
 .lbg-memory-panel,
+.lbg-priority-panel,
+.lbg-book-choice,
 .lbg-root input,
 .lbg-root select,
 .lbg-root textarea,
@@ -285,7 +315,10 @@ body.lbg-mobile-open {
 .lbg-preview,
 .lbg-notice,
 .lbg-memory-panel,
+.lbg-priority-panel,
+.lbg-book-choice,
 .lbg-book-badge,
+.lbg-source-badge,
 .lbg-token-badge,
 .lbg-match-badge,
 .lbg-root input,
@@ -309,30 +342,6 @@ body.lbg-mobile-open {
     background: #1f1f1f !important;
 }
 
-.lbg-entry-disabled {
-    opacity: 0.5;
-}
-
-.lbg-memory-panel {
-    border: 1px solid #343434;
-    border-radius: 8px;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.lbg-memory-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.lbg-memory-info {
-    opacity: 0.82;
-    font-size: 0.88em;
-}
-
 /* Fallback selectors without :has(), for mobile browsers that ignore selector lists containing :has. */
 .lbg-root,
 .lbg-mobile-panel,
@@ -342,7 +351,7 @@ body.lbg-mobile-open {
     color: #dcddd8 !important;
 }
 
-/* v0.1.6: white checkbox ticks and inactive lorebook selector. */
+/* White checkbox ticks. */
 .lbg-root input[type="checkbox"] {
     appearance: none !important;
     -webkit-appearance: none !important;
@@ -379,27 +388,45 @@ body.lbg-mobile-open {
     cursor: not-allowed;
 }
 
-.lbg-book-filter-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 2px 0 8px 0;
-}
-
-.lbg-book-filter-row label {
-    white-space: nowrap;
-    opacity: 0.9;
-}
-
-#lbgInactiveBookFilter {
-    min-width: 220px;
-    max-width: 100%;
-}
-
 @media (max-width: 768px), (pointer: coarse) {
-    .lbg-book-filter-row {
+    .lbg-root {
+        min-height: auto;
+        height: auto;
+        gap: 10px;
+    }
+
+    .lbg-header,
+    .lbg-toolbar,
+    .lbg-actions,
+    .lbg-section-header,
+    .lbg-entry-top,
+    .lbg-book-filter-row,
+    .lbg-priority-header {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .lbg-stats {
+        min-width: 0;
+        width: auto;
+    }
+
+    .lbg-list {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .lbg-preview {
+        max-height: 160px;
+        font-size: 0.85em;
+    }
+
+    .lbg-entry-meta {
+        font-size: 0.82em;
+    }
+
+    .lbg-token-badge {
+        align-self: flex-start;
     }
 
     #lbgInactiveBookFilter {

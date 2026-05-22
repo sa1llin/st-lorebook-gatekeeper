@@ -3,25 +3,17 @@ import { getTokenCountAsync as getTokenCountAsyncDirect } from '../../../../toke
 import { TOKEN_CACHE_KEY } from './constants.js';
 
 export async function addTokenCounts(entries) {
-    const tokenCounter = getTokenCounter();
     const cache = readTokenCache();
     let changed = false;
 
     for (const entry of entries) {
         const cacheKey = buildCacheKey(entry);
-
         if (Number.isFinite(cache[cacheKey])) {
             entry.tokens = cache[cacheKey];
             continue;
         }
 
-        try {
-            entry.tokens = typeof tokenCounter === 'function' ? await tokenCounter(entry.content) : estimateTokens(entry.content);
-        } catch (error) {
-            console.warn(`Lorebook Gatekeeper: token count failed for ${entry.id}.`, error);
-            entry.tokens = estimateTokens(entry.content);
-        }
-
+        entry.tokens = await countTextTokens(entry.content, entry.id);
         cache[cacheKey] = entry.tokens;
         changed = true;
     }
@@ -30,10 +22,28 @@ export async function addTokenCounts(entries) {
     return entries;
 }
 
+export async function countTextTokens(text, debugLabel = 'text') {
+    const tokenCounter = getTokenCounter();
+
+    try {
+        return typeof tokenCounter === 'function' ? await tokenCounter(String(text || '')) : estimateTokens(text);
+    } catch (error) {
+        console.warn(`Lorebook Gatekeeper: token count failed for ${debugLabel}.`, error);
+        return estimateTokens(text);
+    }
+}
+
 export function buildTokenStats(activeEntries, inactiveEntries = []) {
     const activeTokens = sumTokens(activeEntries);
     const inactiveTokens = sumTokens(inactiveEntries);
-    return { activeCount: activeEntries.length, inactiveCount: inactiveEntries.length, activeTokens, inactiveTokens, totalKnownTokens: activeTokens + inactiveTokens };
+
+    return {
+        activeCount: activeEntries.length,
+        inactiveCount: inactiveEntries.length,
+        activeTokens,
+        inactiveTokens,
+        totalKnownTokens: activeTokens + inactiveTokens,
+    };
 }
 
 export function sumTokens(entries) {
@@ -71,10 +81,12 @@ function buildCacheKey(entry) {
 function hashString(value) {
     let hash = 0;
     const text = String(value || '');
+
     for (let i = 0; i < text.length; i += 1) {
         hash = ((hash << 5) - hash) + text.charCodeAt(i);
         hash |= 0;
     }
+
     return String(hash);
 }
 
@@ -92,6 +104,7 @@ function writeTokenCache(cache) {
         const keys = Object.keys(cache);
         const trimmed = {};
         const maxItems = 5000;
+
         for (const key of keys.slice(Math.max(0, keys.length - maxItems))) trimmed[key] = cache[key];
         localStorage.setItem(TOKEN_CACHE_KEY, JSON.stringify(trimmed));
     } catch (error) {

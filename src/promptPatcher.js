@@ -18,6 +18,7 @@ export function removeEntriesFromChat(chat, disabledEntries) {
     for (const entry of disabledEntries) {
         for (const message of chat) {
             if (typeof message?.content !== 'string') continue;
+
             const patched = removeEntryContentOnce(message.content, entry);
             if (patched.removed) {
                 message.content = cleanupPrompt(patched.text);
@@ -30,13 +31,24 @@ export function removeEntriesFromChat(chat, disabledEntries) {
 export function injectManualEntriesIntoChat(chat, manualEntries) {
     const block = formatManualEntries(manualEntries);
     if (!block || !Array.isArray(chat)) return;
+
     chat.unshift({ role: 'system', content: block });
 }
 
 export function formatManualEntries(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return '';
-    const parts = entries.map((entry) => [`Book: ${entry.bookName}`, `Entry: ${entry.title}`, entry.content].join('\n'));
+
+    const parts = entries.map((entry) => [
+        `Book: ${entry.bookName}`,
+        `Entry: ${entry.title}`,
+        entry.content,
+    ].join('\n'));
+
     return [MANUAL_BLOCK_TITLE, ...parts].join('\n\n');
+}
+
+export function cleanupPrompt(text) {
+    return String(text || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function removeEntryContentOnce(text, entry) {
@@ -45,12 +57,22 @@ function removeEntryContentOnce(text, entry) {
     if (!content) return { text: source, removed: false };
 
     const exactIndex = source.indexOf(content);
-    if (exactIndex !== -1) return { text: source.slice(0, exactIndex) + source.slice(exactIndex + content.length), removed: true };
+    if (exactIndex !== -1) {
+        return {
+            text: source.slice(0, exactIndex) + source.slice(exactIndex + content.length),
+            removed: true,
+        };
+    }
 
     const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const normalizedSource = source.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const normalizedIndex = normalizedSource.indexOf(normalizedContent);
-    if (normalizedIndex !== -1) return { text: normalizedSource.slice(0, normalizedIndex) + normalizedSource.slice(normalizedIndex + normalizedContent.length), removed: true };
+    if (normalizedIndex !== -1) {
+        return {
+            text: normalizedSource.slice(0, normalizedIndex) + normalizedSource.slice(normalizedIndex + normalizedContent.length),
+            removed: true,
+        };
+    }
 
     const regex = buildWhitespaceFlexibleRegex(content);
     const regexResult = source.replace(regex, '');
@@ -60,10 +82,10 @@ function removeEntryContentOnce(text, entry) {
 }
 
 function buildWhitespaceFlexibleRegex(value) {
-    const escaped = String(value || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
-    return new RegExp(escaped, 'm');
-}
+    const escaped = String(value || '')
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\s+/g, '\\s+');
 
-function cleanupPrompt(text) {
-    return String(text || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    return new RegExp(escaped, 'm');
 }

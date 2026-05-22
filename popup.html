@@ -6,18 +6,17 @@
         </div>
 
         <div class="lbg-stats">
-            <div>Activated entries: <span id="lbgActiveCount">0</span></div>
-            <div>Inactive entries: <span id="lbgInactiveCount">0</span></div>
-            <div>Before: <span id="lbgBeforeTokens">0</span> tokens</div>
-            <div>Selected: <span id="lbgSelectedTokens">0</span> tokens</div>
-            <div>Added: <span id="lbgAddedTokens">0</span> tokens</div>
-            <div>Saved: <span id="lbgSavedTokens">0</span> tokens</div>
+            <div>Activated entries: <strong id="lbgActiveCount">0</strong></div>
+            <div>Inactive entries: <strong id="lbgInactiveCount">0</strong></div>
+            <div>Before: <strong id="lbgBeforeTokens">0</strong> tokens</div>
+            <div>Selected: <strong id="lbgSelectedTokens">0</strong> tokens</div>
+            <div>Added: <strong id="lbgAddedTokens">0</strong> tokens</div>
+            <div>Saved: <strong id="lbgSavedTokens">0</strong> tokens</div>
         </div>
     </div>
 
     <div class="lbg-toolbar">
-        <input id="lbgSearch" class="text_pole" type="text" placeholder="Search by title, key, content, or book..." />
-
+        <input id="lbgSearch" class="text_pole" type="search" placeholder="Search entries, lorebooks, keys, content..." />
         <select id="lbgSort" class="text_pole">
             <option value="tokens_desc">Tokens: high to low</option>
             <option value="tokens_asc">Tokens: low to high</option>
@@ -28,13 +27,13 @@
 
     <div class="lbg-actions">
         <label class="lbg-inline-check">
-            <input id="lbgShowInactive" type="checkbox" checked />
+            <input id="lbgShowInactive" type="checkbox" />
             <span>Show inactive entries for manual selection</span>
         </label>
 
         <div class="lbg-action-buttons">
-            <button id="lbgEnableAllActive" class="menu_button" type="button">Enable all active</button>
-            <button id="lbgDisableAllActive" class="menu_button" type="button">Disable all active</button>
+            <button id="lbgEnableAllActive" type="button" class="menu_button">Enable all active</button>
+            <button id="lbgDisableAllActive" type="button" class="menu_button">Disable all active</button>
         </div>
     </div>
 
@@ -45,23 +44,25 @@
         </label>
 
         <div class="lbg-memory-actions">
-            <button id="lbgApplyRememberedChoice" class="menu_button" type="button">Apply remembered choice</button>
-            <button id="lbgClearRememberedChoice" class="menu_button" type="button">Clear remembered choice</button>
+            <button id="lbgApplyRememberedChoice" type="button" class="menu_button">Apply remembered choice</button>
+            <button id="lbgApplyPreviousChoice" type="button" class="menu_button">Apply previous request choice</button>
+            <button id="lbgClearRememberedChoice" type="button" class="menu_button">Clear remembered choice</button>
         </div>
 
         <div id="lbgRememberedChoiceInfo" class="lbg-memory-info">No remembered choice.</div>
+        <div id="lbgPreviousChoiceInfo" class="lbg-memory-info">No previous request choice.</div>
     </div>
 
     <div class="lbg-section-header">
         <h4>Activated entries</h4>
-        <span><span id="lbgActiveVisibleCount">0</span> visible</span>
+        <span><strong id="lbgActiveVisibleCount">0</strong> visible</span>
     </div>
     <div id="lbgActiveEntries" class="lbg-list"></div>
 
     <div id="lbgInactiveSection">
         <div class="lbg-section-header">
             <h4>Inactive entries</h4>
-            <span><span id="lbgInactiveVisibleCount">0</span> visible</span>
+            <span><strong id="lbgInactiveVisibleCount">0</strong> visible</span>
         </div>
 
         <div class="lbg-book-filter-row">
@@ -69,6 +70,20 @@
             <select id="lbgInactiveBookFilter" class="text_pole">
                 <option value="__all__">All lorebooks</option>
             </select>
+        </div>
+
+        <div class="lbg-priority-panel">
+            <div class="lbg-priority-header">
+                <div>
+                    <strong>Prioritize inactive lorebooks</strong>
+                    <div class="lbg-priority-hint">Selected lorebooks stay visible together with all others, but their inactive entries are shown first.</div>
+                </div>
+                <div class="lbg-priority-actions">
+                    <button id="lbgUseLinkedBooksFirst" type="button" class="menu_button">Use linked/global first</button>
+                    <button id="lbgClearPreferredBooks" type="button" class="menu_button">Clear priority</button>
+                </div>
+            </div>
+            <div id="lbgPreferredInactiveBooks" class="lbg-book-choice-list"></div>
         </div>
 
         <div id="lbgInactiveEntries" class="lbg-list"></div>

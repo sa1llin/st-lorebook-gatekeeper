@@ -2,8 +2,9 @@
 // This file is loaded from /scripts/extensions/third-party/st-lorebook-gatekeeper/src/.
 // script.js is located at the web root, so the correct relative path is ../../../../../script.js.
 // Using ../../../../script.js resolves to /scripts/script.js and causes 404 on load.
-import { getRequestHeaders } from '../../../../../script.js';
+import { getRequestHeaders, chat_metadata, characters, this_chid } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
+import { power_user } from '../../../../power-user.js';
 
 let worldInfoModulePromise = null;
 
@@ -12,6 +13,7 @@ export async function collectWorldInfoEntries() {
     const worldInfoModule = await getWorldInfoModule();
     const bookNames = await getAvailableWorldInfoNames(context, worldInfoModule);
     const loadWorldInfoFn = getLoadWorldInfoFunction(context, worldInfoModule);
+    const sourceHints = getLorebookSourceHints(context, worldInfoModule);
 
     if (!bookNames.length) {
         console.warn('Lorebook Gatekeeper: no World Info books were found. Review will open with an empty lorebook list.');
@@ -23,7 +25,8 @@ export async function collectWorldInfoEntries() {
     for (const bookName of bookNames) {
         try {
             const book = await loadWorldInfoFn(bookName);
-            entries.push(...normalizeBookEntries(bookName, book));
+            const sourceType = sourceHints.get(bookName) || 'other';
+            entries.push(...normalizeBookEntries(bookName, book, sourceType));
         } catch (error) {
             console.warn(`Lorebook Gatekeeper: failed to load world info book "${bookName}".`, error);
         }
@@ -113,7 +116,6 @@ async function fetchWorldInfoNamesFromSettingsApi() {
         });
 
         if (!response.ok) return [];
-
         const data = await response.json();
         return Array.isArray(data?.world_names) ? data.world_names : [];
     } catch (error) {
@@ -155,12 +157,68 @@ async function loadWorldInfoViaApi(bookName) {
     return await response.json();
 }
 
-function normalizeBookEntries(bookName, book) {
-    if (!book || !book.entries) return [];
-    return Object.values(book.entries).map((entry) => normalizeWorldInfoEntry(bookName, entry)).filter(Boolean);
+function getLorebookSourceHints(context, worldInfoModule) {
+    const hints = new Map();
+    const metadataKey = worldInfoModule?.METADATA_KEY || 'world_info';
+
+    const chatBook = firstString(
+        chat_metadata?.[metadataKey],
+        context?.chatMetadata?.[metadataKey],
+        globalThis.chat_metadata?.[metadataKey],
+    );
+    addSourceHint(hints, chatBook, 'chat');
+
+    const personaBook = firstString(
+        power_user?.persona_description_lorebook,
+        context?.powerUser?.persona_description_lorebook,
+        globalThis.power_user?.persona_description_lorebook,
+    );
+    addSourceHint(hints, personaBook, 'persona');
+
+    const characterBook = firstString(
+        characters?.[this_chid]?.data?.extensions?.world,
+        context?.characters?.[context?.this_chid]?.data?.extensions?.world,
+    );
+    addSourceHint(hints, characterBook, 'character');
+
+    const globalBooks = [
+        ...(Array.isArray(worldInfoModule?.selected_world_info) ? worldInfoModule.selected_world_info : []),
+        ...(Array.isArray(worldInfoModule?.world_info?.globalSelect) ? worldInfoModule.world_info.globalSelect : []),
+        ...(Array.isArray(context?.worldInfo?.globalSelect) ? context.worldInfo.globalSelect : []),
+    ];
+    for (const bookName of globalBooks) addSourceHint(hints, bookName, 'global');
+
+    return hints;
 }
 
-function normalizeWorldInfoEntry(bookName, entry) {
+function addSourceHint(hints, bookName, sourceType) {
+    const normalized = String(bookName || '').trim();
+    if (!normalized) return;
+
+    const current = hints.get(normalized);
+    if (!current || getSourcePriority(sourceType) < getSourcePriority(current)) {
+        hints.set(normalized, sourceType);
+    }
+}
+
+function firstString(...values) {
+    for (const value of values) {
+        const normalized = String(value || '').trim();
+        if (normalized) return normalized;
+    }
+
+    return '';
+}
+
+function normalizeBookEntries(bookName, book, sourceType = 'other') {
+    if (!book || !book.entries) return [];
+
+    return Object.values(book.entries)
+        .map((entry) => normalizeWorldInfoEntry(bookName, entry, sourceType))
+        .filter(Boolean);
+}
+
+function normalizeWorldInfoEntry(bookName, entry, sourceType) {
     if (!entry || entry.disable === true) return null;
 
     const content = String(entry.content || '').trim();
@@ -182,6 +240,8 @@ function normalizeWorldInfoEntry(bookName, entry) {
         role: entry.role,
         constant: Boolean(entry.constant),
         selective: Boolean(entry.selective),
+        sourceType,
+        sourcePriority: getSourcePriority(sourceType),
         raw: entry,
         active: false,
         matchType: 'none',
@@ -195,6 +255,16 @@ function normalizeStringArray(value) {
     if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
     if (typeof value === 'string' && value.trim()) return [value.trim()];
     return [];
+}
+
+function getSourcePriority(sourceType) {
+    switch (sourceType) {
+        case 'chat': return 0;
+        case 'persona': return 1;
+        case 'character': return 2;
+        case 'global': return 3;
+        default: return 4;
+    }
 }
 
 function dedupeEntries(entries) {

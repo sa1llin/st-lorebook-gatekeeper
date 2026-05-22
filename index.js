@@ -1,5 +1,4 @@
 import { eventSource, event_types, main_api, stopGeneration } from '../../../../script.js';
-
 import { findActiveEntries, splitActiveAndInactive } from './src/activationMatcher.js';
 import { collectWorldInfoEntries } from './src/worldInfoCollector.js';
 import { addTokenCounts, buildTokenStats } from './src/tokenCounter.js';
@@ -13,6 +12,10 @@ import {
 } from './src/promptPatcher.js';
 import { showLorebookReviewPopup } from './src/reviewPopup.js';
 import { MODULE_NAME } from './src/constants.js';
+import {
+    queueItemizedPromptCorrection,
+    scheduleItemizedPromptCorrectionFlush,
+} from './src/itemizationPatch.js';
 
 const settings = getSettings();
 
@@ -46,14 +49,12 @@ function addLaunchButton() {
     launchButton.appendChild(textSpan);
 
     const extensionsMenu = document.getElementById('prompt_inspector_wand_container') ?? document.getElementById('extensionsMenu');
-
     if (!extensionsMenu) {
         console.warn(`${MODULE_NAME}: extensions menu was not found. Toggle button was not added.`);
         return;
     }
 
     extensionsMenu.appendChild(launchButton);
-
     launchButton.addEventListener('click', () => {
         settings.enabled = !settings.enabled;
         saveSettings(settings);
@@ -73,15 +74,13 @@ async function reviewPrompt(promptText, options = {}) {
 
     if (options.skipWhenNoActive && activeEntries.length === 0 && !settings.showManualOnlyWhenNoActive) {
         console.debug(`${MODULE_NAME}: skipped preliminary prompt review because no active Lorebook entries were detected.`);
-        return { action: 'discard', disabledEntries: [], manualEntries: [] };
+        return { action: 'discard', disabledEntries: [], manualEntries: [], selectedActiveEntries: [] };
     }
 
     await addTokenCounts(activeEntries);
-
     if (settings.countInactiveTokens) await addTokenCounts(inactiveEntries);
 
     const statsBefore = buildTokenStats(activeEntries, inactiveEntries);
-
     const result = await showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings });
     saveSettings(settings);
     return result;
@@ -95,7 +94,7 @@ async function handleReviewResult(result, applyChanges) {
         return;
     }
 
-    if (result.action === 'confirm') applyChanges(result);
+    if (result.action === 'confirm') await applyChanges(result);
 }
 
 eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
@@ -105,9 +104,15 @@ eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
         const promptText = getPromptTextFromChat(data.chat);
         const result = await reviewPrompt(promptText);
 
-        await handleReviewResult(result, ({ disabledEntries, manualEntries }) => {
+        await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             removeEntriesFromChat(data.chat, disabledEntries);
             injectManualEntriesIntoChat(data.chat, manualEntries);
+            await queueItemizedPromptCorrection({
+                finalPrompt: data.chat,
+                selectedActiveEntries,
+                disabledEntries,
+                manualEntries,
+            });
             console.debug(`${MODULE_NAME}: chat completion prompt updated.`);
         });
     } catch (error) {
@@ -127,15 +132,25 @@ eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
     try {
         const result = await reviewPrompt(data.prompt, { skipWhenNoActive: true });
 
-        await handleReviewResult(result, ({ disabledEntries, manualEntries }) => {
+        await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             data.prompt = removeEntriesFromTextPrompt(data.prompt, disabledEntries);
             data.prompt = injectManualEntriesIntoTextPrompt(data.prompt, manualEntries);
+            await queueItemizedPromptCorrection({
+                finalPrompt: data.prompt,
+                selectedActiveEntries,
+                disabledEntries,
+                manualEntries,
+            });
             console.debug(`${MODULE_NAME}: text completion prompt updated.`);
         });
     } catch (error) {
         console.error(`${MODULE_NAME}: failed to review text completion prompt.`, error);
         toastr.error(`${MODULE_NAME}: failed to review prompt. Check browser console.`);
     }
+});
+
+eventSource.on(event_types.GENERATE_AFTER_DATA, () => {
+    scheduleItemizedPromptCorrectionFlush();
 });
 
 (function init() {
