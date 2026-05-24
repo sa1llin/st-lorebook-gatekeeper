@@ -2,7 +2,16 @@ import { MANUAL_BLOCK_TITLE } from './constants.js';
 
 export function removeEntriesFromTextPrompt(prompt, disabledEntries) {
     let result = String(prompt || '');
-    for (const entry of disabledEntries) result = removeEntryContentOnce(result, entry).text;
+    for (const entry of disabledEntries) result = removeEntryContentOnce(result, getOriginalEntryContent(entry)).text;
+    return cleanupPrompt(result);
+}
+
+export function replaceEditedEntriesInTextPrompt(prompt, selectedEntries) {
+    let result = String(prompt || '');
+    for (const entry of selectedEntries) {
+        if (!hasPromptEdit(entry)) continue;
+        result = replaceEntryContentOnce(result, getOriginalEntryContent(entry), getPromptEntryContent(entry)).text;
+    }
     return cleanupPrompt(result);
 }
 
@@ -19,8 +28,26 @@ export function removeEntriesFromChat(chat, disabledEntries) {
         for (const message of chat) {
             if (typeof message?.content !== 'string') continue;
 
-            const patched = removeEntryContentOnce(message.content, entry);
+            const patched = removeEntryContentOnce(message.content, getOriginalEntryContent(entry));
             if (patched.removed) {
+                message.content = cleanupPrompt(patched.text);
+                break;
+            }
+        }
+    }
+}
+
+export function replaceEditedEntriesInChat(chat, selectedEntries) {
+    if (!Array.isArray(chat)) return;
+
+    for (const entry of selectedEntries) {
+        if (!hasPromptEdit(entry)) continue;
+
+        for (const message of chat) {
+            if (typeof message?.content !== 'string') continue;
+
+            const patched = replaceEntryContentOnce(message.content, getOriginalEntryContent(entry), getPromptEntryContent(entry));
+            if (patched.replaced) {
                 message.content = cleanupPrompt(patched.text);
                 break;
             }
@@ -40,26 +67,53 @@ export function formatManualEntries(entries) {
     const parts = entries.map((entry) => [
         `Book: ${entry.bookName}`,
         `Entry: ${entry.title}`,
-        entry.content,
+        getPromptEntryContent(entry),
     ].join('\n'));
 
     return [MANUAL_BLOCK_TITLE, ...parts].join('\n\n');
+}
+
+export function getPromptEntryContent(entry) {
+    if (Object.prototype.hasOwnProperty.call(entry || {}, 'temporaryContent')) {
+        return String(entry.temporaryContent || '');
+    }
+
+    return String(entry?.content || '');
 }
 
 export function cleanupPrompt(text) {
     return String(text || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function removeEntryContentOnce(text, entry) {
+function getOriginalEntryContent(entry) {
+    return String(entry?.originalContent ?? entry?.content ?? '');
+}
+
+function hasPromptEdit(entry) {
+    if (!Object.prototype.hasOwnProperty.call(entry || {}, 'temporaryContent')) return false;
+    return getPromptEntryContent(entry) !== getOriginalEntryContent(entry);
+}
+
+function removeEntryContentOnce(text, contentOrEntry) {
+    const content = typeof contentOrEntry === 'string'
+        ? contentOrEntry
+        : getOriginalEntryContent(contentOrEntry);
+
+    const patched = replaceEntryContentOnce(text, content, '');
+    return { text: patched.text, removed: patched.replaced };
+}
+
+function replaceEntryContentOnce(text, sourceContent, replacementContent) {
     const source = String(text || '');
-    const content = String(entry?.content || '');
-    if (!content) return { text: source, removed: false };
+    const content = String(sourceContent || '');
+    const replacement = String(replacementContent || '');
+    if (!content) return { text: source, replaced: false };
 
     const exactIndex = source.indexOf(content);
     if (exactIndex !== -1) {
         return {
-            text: source.slice(0, exactIndex) + source.slice(exactIndex + content.length),
-            removed: true,
+            text: source.slice(0, exactIndex) + replacement + source.slice(exactIndex + content.length),
+            replaced: true,
         };
     }
 
@@ -68,16 +122,16 @@ function removeEntryContentOnce(text, entry) {
     const normalizedIndex = normalizedSource.indexOf(normalizedContent);
     if (normalizedIndex !== -1) {
         return {
-            text: normalizedSource.slice(0, normalizedIndex) + normalizedSource.slice(normalizedIndex + normalizedContent.length),
-            removed: true,
+            text: normalizedSource.slice(0, normalizedIndex) + replacement + normalizedSource.slice(normalizedIndex + normalizedContent.length),
+            replaced: true,
         };
     }
 
     const regex = buildWhitespaceFlexibleRegex(content);
-    const regexResult = source.replace(regex, '');
-    if (regexResult !== source) return { text: regexResult, removed: true };
+    const regexResult = source.replace(regex, replacement);
+    if (regexResult !== source) return { text: regexResult, replaced: true };
 
-    return { text: source, removed: false };
+    return { text: source, replaced: false };
 }
 
 function buildWhitespaceFlexibleRegex(value) {

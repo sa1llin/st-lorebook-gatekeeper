@@ -1,5 +1,10 @@
 import { itemizedPrompts } from '../../../../../script.js';
-import { formatManualEntries, removeEntriesFromTextPrompt } from './promptPatcher.js';
+import {
+    formatManualEntries,
+    getPromptEntryContent,
+    removeEntriesFromTextPrompt,
+    replaceEditedEntriesInTextPrompt,
+} from './promptPatcher.js';
 import { countTextTokens } from './tokenCounter.js';
 
 const FLUSH_DELAYS_MS = [0, 25, 100, 300, 750];
@@ -70,11 +75,12 @@ function applyPendingPatch() {
 function patchStringField(target, fieldName, patch) {
     if (typeof target?.[fieldName] !== 'string') return;
     target[fieldName] = removeEntriesFromTextPrompt(target[fieldName], patch.disabledEntries);
+    target[fieldName] = replaceEditedEntriesInTextPrompt(target[fieldName], patch.selectedActiveEntries);
 }
 
 function buildWorldInfoString(selectedActiveEntries, manualEntries) {
     const activeText = selectedActiveEntries
-        .map((entry) => String(entry.content || '').trim())
+        .map((entry) => String(getPromptEntryContent(entry) || '').trim())
         .filter(Boolean)
         .join('\n\n');
 

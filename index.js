@@ -9,9 +9,12 @@ import {
     injectManualEntriesIntoTextPrompt,
     removeEntriesFromChat,
     removeEntriesFromTextPrompt,
+    replaceEditedEntriesInChat,
+    replaceEditedEntriesInTextPrompt,
 } from './src/promptPatcher.js';
 import { showLorebookReviewPopup } from './src/reviewPopup.js';
 import { MODULE_NAME } from './src/constants.js';
+import { isLocked } from './src/entryMetaStore.js';
 import {
     queueItemizedPromptCorrection,
     scheduleItemizedPromptCorrectionFlush,
@@ -72,8 +75,9 @@ async function reviewPrompt(promptText, options = {}) {
     const activeEntries = findActiveEntries(allEntries, promptText);
     const { inactiveEntries } = splitActiveAndInactive(allEntries, activeEntries);
 
-    if (options.skipWhenNoActive && activeEntries.length === 0 && !settings.showManualOnlyWhenNoActive) {
-        console.debug(`${MODULE_NAME}: skipped preliminary prompt review because no active Lorebook entries were detected.`);
+    const hasLockedEntries = allEntries.some((entry) => isLocked(settings, entry));
+    if (options.skipWhenNoActive && activeEntries.length === 0 && !hasLockedEntries && !settings.showManualOnlyWhenNoActive) {
+        console.debug(`${MODULE_NAME}: skipped preliminary prompt review because no active or locked Lorebook entries were detected.`);
         return { action: 'discard', disabledEntries: [], manualEntries: [], selectedActiveEntries: [] };
     }
 
@@ -106,6 +110,7 @@ eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
 
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             removeEntriesFromChat(data.chat, disabledEntries);
+            replaceEditedEntriesInChat(data.chat, selectedActiveEntries);
             injectManualEntriesIntoChat(data.chat, manualEntries);
 
             await queueItemizedPromptCorrection({
@@ -136,6 +141,7 @@ eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
 
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             data.prompt = removeEntriesFromTextPrompt(data.prompt, disabledEntries);
+            data.prompt = replaceEditedEntriesInTextPrompt(data.prompt, selectedActiveEntries);
             data.prompt = injectManualEntriesIntoTextPrompt(data.prompt, manualEntries);
 
             await queueItemizedPromptCorrection({

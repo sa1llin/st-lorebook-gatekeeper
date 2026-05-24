@@ -11,6 +11,8 @@ export const defaultSettings = {
     preferredInactiveBookNames: [],
 
     favorites: {},
+    lockedEntries: {},
+    blockedEntries: {},
     entryTags: {},
     customTags: {},
     tagColors: {},
@@ -40,6 +42,13 @@ function normalizeSettings(settings) {
 
     normalized.preferredInactiveBookNames = toStringArray(normalized.preferredInactiveBookNames);
     normalized.favorites = normalizeBooleanMap(normalized.favorites);
+    normalized.lockedEntries = normalizeBooleanMap(normalized.lockedEntries);
+    normalized.blockedEntries = normalizeBooleanMap(normalized.blockedEntries);
+
+    for (const entryId of Object.keys(normalized.blockedEntries)) {
+        delete normalized.lockedEntries[entryId];
+    }
+
     normalized.entryTags = normalizeEntryTags(normalized.entryTags);
     normalized.customTags = normalizeCustomTags(normalized.customTags);
     normalized.tagColors = normalizeStringMap(normalized.tagColors);

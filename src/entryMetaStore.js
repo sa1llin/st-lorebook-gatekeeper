@@ -26,11 +26,17 @@ const TAG_COLOR_PALETTE = [
 
 export function ensureEntryMetaSettings(settings) {
     if (!settings.favorites || typeof settings.favorites !== 'object') settings.favorites = {};
+    if (!settings.lockedEntries || typeof settings.lockedEntries !== 'object') settings.lockedEntries = {};
+    if (!settings.blockedEntries || typeof settings.blockedEntries !== 'object') settings.blockedEntries = {};
     if (!settings.entryTags || typeof settings.entryTags !== 'object') settings.entryTags = {};
     if (!settings.customTags || typeof settings.customTags !== 'object') settings.customTags = {};
     if (!settings.tagColors || typeof settings.tagColors !== 'object') settings.tagColors = {};
     if (!settings.tagFilter || typeof settings.tagFilter !== 'object') {
         settings.tagFilter = { selectedTags: [], mode: 'or' };
+    }
+
+    for (const entryId of Object.keys(settings.blockedEntries)) {
+        delete settings.lockedEntries[entryId];
     }
 
     settings.tagFilter.selectedTags = toStringArray(settings.tagFilter.selectedTags).map(normalizeTagName).filter(Boolean);
@@ -60,6 +66,46 @@ export function toggleFavorite(settings, entryOrId) {
     }
 
     return Boolean(settings.favorites[entryId]);
+}
+
+export function isLocked(settings, entryOrId) {
+    ensureEntryMetaSettings(settings);
+    const entryId = typeof entryOrId === 'string' ? entryOrId : getEntryMetaId(entryOrId);
+    return Boolean(settings.lockedEntries[entryId]);
+}
+
+export function toggleLocked(settings, entryOrId) {
+    ensureEntryMetaSettings(settings);
+    const entryId = typeof entryOrId === 'string' ? entryOrId : getEntryMetaId(entryOrId);
+
+    if (settings.lockedEntries[entryId]) {
+        delete settings.lockedEntries[entryId];
+    } else {
+        settings.lockedEntries[entryId] = true;
+        delete settings.blockedEntries[entryId];
+    }
+
+    return Boolean(settings.lockedEntries[entryId]);
+}
+
+export function isBlocked(settings, entryOrId) {
+    ensureEntryMetaSettings(settings);
+    const entryId = typeof entryOrId === 'string' ? entryOrId : getEntryMetaId(entryOrId);
+    return Boolean(settings.blockedEntries[entryId]);
+}
+
+export function toggleBlocked(settings, entryOrId) {
+    ensureEntryMetaSettings(settings);
+    const entryId = typeof entryOrId === 'string' ? entryOrId : getEntryMetaId(entryOrId);
+
+    if (settings.blockedEntries[entryId]) {
+        delete settings.blockedEntries[entryId];
+    } else {
+        settings.blockedEntries[entryId] = true;
+        delete settings.lockedEntries[entryId];
+    }
+
+    return Boolean(settings.blockedEntries[entryId]);
 }
 
 export function getEntryTags(settings, entryOrId) {

@@ -28,10 +28,14 @@ import {
     getEntryTags,
     getTagColor,
     getTagUsageCounts,
+    isBlocked,
     isFavorite,
+    isLocked,
     normalizeTagName,
     removeEntryTag,
+    toggleBlocked,
     toggleFavorite,
+    toggleLocked,
 } from './entryMetaStore.js';
 
 export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings }) {
@@ -39,14 +43,15 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
 
     const template = $(await renderExtensionTemplateAsync(EXTENSION_PATH, 'popup'));
     const state = {
-        activeEntries: activeEntries.map((entry) => ({ ...entry, stableId: entry.stableId || entry.id, selected: true, originallyActive: true })),
-        inactiveEntries: inactiveEntries.map((entry) => ({ ...entry, stableId: entry.stableId || entry.id, selected: false, originallyActive: false })),
+        activeEntries: activeEntries.map((entry) => createStateEntry(entry, true, true, settings)),
+        inactiveEntries: inactiveEntries.map((entry) => createStateEntry(entry, false, false, settings)),
         settings,
         statsBefore,
         rememberedChoice: loadRememberedChoice(),
         previousChoice: loadPreviousChoice(),
         inactiveBookFilter: ALL_LOREBOOKS_FILTER,
     };
+    enforceEntryRules(state);
 
     initializeControls(template, state);
     renderTagFilterList(template, state);
@@ -62,18 +67,96 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
 
     const popupResult = await showReviewDialog(template, cancelGenerationButton);
     if (popupResult === CANCEL_GENERATION_RESULT) return { action: 'cancel', disabledEntries: [], manualEntries: [] };
-    if (!popupResult) return { action: 'discard', disabledEntries: [], manualEntries: [] };
+    if (!popupResult) return buildPersistentRuleResult(state);
 
     state.previousChoice = savePreviousChoiceFromState(state);
     if (Boolean(template.find('#lbgRememberChoice').prop('checked'))) {
         state.rememberedChoice = saveRememberedChoiceFromState(state);
     }
 
+    return buildConfirmedResult(state);
+}
+
+function buildConfirmedResult(state) {
+    enforceEntryRules(state);
+
     const selectedActiveEntries = state.activeEntries.filter((entry) => entry.selected);
     const disabledEntries = state.activeEntries.filter((entry) => !entry.selected);
     const manualEntries = state.inactiveEntries.filter((entry) => entry.selected);
 
     return { action: 'confirm', selectedActiveEntries, disabledEntries, manualEntries };
+}
+
+function buildPersistentRuleResult(state) {
+    const selectedActiveEntries = state.activeEntries.filter((entry) => !isBlocked(state.settings, entry));
+    const disabledEntries = state.activeEntries.filter((entry) => isBlocked(state.settings, entry));
+    const manualEntries = state.inactiveEntries.filter((entry) => isLocked(state.settings, entry) && !isBlocked(state.settings, entry));
+
+    if (!disabledEntries.length && !manualEntries.length) {
+        return { action: 'discard', disabledEntries: [], manualEntries: [], selectedActiveEntries: [] };
+    }
+
+    return { action: 'confirm', selectedActiveEntries, disabledEntries, manualEntries };
+}
+
+function createStateEntry(entry, selected, originallyActive, settings) {
+    const content = String(entry?.content || '');
+    const stateEntry = {
+        ...entry,
+        stableId: entry.stableId || entry.id,
+        originalContent: content,
+        content,
+        selected,
+        originallyActive,
+    };
+
+    applyEntryRule(stateEntry, settings);
+    return stateEntry;
+}
+
+function enforceEntryRules(state) {
+    for (const entry of [...state.activeEntries, ...state.inactiveEntries]) {
+        applyEntryRule(entry, state.settings);
+    }
+}
+
+function applyEntryRule(entry, settings) {
+    if (isBlocked(settings, entry)) {
+        entry.selected = false;
+        return;
+    }
+
+    if (isLocked(settings, entry)) {
+        entry.selected = true;
+    }
+}
+
+function getEntryPromptContent(entry) {
+    if (Object.prototype.hasOwnProperty.call(entry, 'temporaryContent')) {
+        return String(entry.temporaryContent || '');
+    }
+
+    return String(entry.content || '');
+}
+
+function hasTemporaryEdit(entry) {
+    if (!Object.prototype.hasOwnProperty.call(entry, 'temporaryContent')) return false;
+    return String(entry.temporaryContent || '') !== String(entry.originalContent ?? entry.content ?? '');
+}
+
+function setTemporaryEdit(entry, content) {
+    const nextContent = String(content || '');
+    const originalContent = String(entry.originalContent ?? entry.content ?? '');
+
+    if (nextContent === originalContent) {
+        delete entry.temporaryContent;
+    } else {
+        entry.temporaryContent = nextContent;
+    }
+}
+
+function clearTemporaryEdit(entry) {
+    delete entry.temporaryContent;
 }
 
 function shouldUseMobileOverlay() {
@@ -255,6 +338,7 @@ function initializeControls(template, state) {
         }
 
         applyRememberedChoiceToState(state, state.rememberedChoice);
+        enforceEntryRules(state);
         renderLists(template, state);
         updateStats(template, state);
         updateChoiceInfo(template, state);
@@ -270,6 +354,7 @@ function initializeControls(template, state) {
         }
 
         applyPreviousChoiceToState(state, state.previousChoice);
+        enforceEntryRules(state);
         renderLists(template, state);
         updateStats(template, state);
         updateChoiceInfo(template, state);
@@ -287,16 +372,18 @@ function initializeControls(template, state) {
 
     template.find('#lbgDisableAllActive').on('click', () => {
         state.activeEntries.forEach((entry) => {
-            entry.selected = false;
+            if (!isLocked(state.settings, entry) && !isBlocked(state.settings, entry)) entry.selected = false;
         });
+        enforceEntryRules(state);
         renderLists(template, state);
         updateStats(template, state);
     });
 
     template.find('#lbgEnableAllActive').on('click', () => {
         state.activeEntries.forEach((entry) => {
-            entry.selected = true;
+            entry.selected = !isBlocked(state.settings, entry);
         });
+        enforceEntryRules(state);
         renderLists(template, state);
         updateStats(template, state);
     });
@@ -544,7 +631,15 @@ function renderEntrySet(container, entries, state, template) {
 
     for (const entry of entries) {
         container.append(createEntryElement(entry, state, template, () => {
-            entry.selected = !entry.selected;
+            if (isBlocked(state.settings, entry)) {
+                entry.selected = false;
+            } else if (isLocked(state.settings, entry)) {
+                entry.selected = true;
+            } else {
+                entry.selected = !entry.selected;
+            }
+
+            enforceEntryRules(state);
             renderLists(template, state);
             updateStats(template, state);
         }));
@@ -552,8 +647,20 @@ function renderEntrySet(container, entries, state, template) {
 }
 
 function createEntryElement(entry, state, template, onToggle) {
+    const locked = isLocked(state.settings, entry);
+    const blocked = isBlocked(state.settings, entry);
+    const favorite = isFavorite(state.settings, entry);
+    const edited = hasTemporaryEdit(entry);
+
     const element = document.createElement('div');
-    element.className = `lbg-entry ${entry.selected ? 'lbg-entry-selected' : 'lbg-entry-disabled'} ${isFavorite(state.settings, entry) ? 'lbg-entry-favorite' : ''}`;
+    element.className = [
+        'lbg-entry',
+        entry.selected ? 'lbg-entry-selected' : 'lbg-entry-disabled',
+        favorite ? 'lbg-entry-favorite' : '',
+        locked ? 'lbg-entry-locked' : '',
+        blocked ? 'lbg-entry-blocked' : '',
+        edited ? 'lbg-entry-edited' : '',
+    ].filter(Boolean).join(' ');
 
     const top = document.createElement('div');
     top.className = 'lbg-entry-top';
@@ -564,6 +671,12 @@ function createEntryElement(entry, state, template, onToggle) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = Boolean(entry.selected);
+    checkbox.disabled = locked || blocked;
+    checkbox.title = blocked
+        ? 'Never include is enabled for this entry.'
+        : locked
+            ? 'Locked entries stay selected until unlocked.'
+            : 'Include this entry in the prompt.';
     checkbox.addEventListener('change', onToggle);
 
     const title = document.createElement('span');
@@ -576,11 +689,41 @@ function createEntryElement(entry, state, template, onToggle) {
     const entryActions = document.createElement('div');
     entryActions.className = 'lbg-entry-actions';
 
+    const lockButton = document.createElement('button');
+    lockButton.type = 'button';
+    lockButton.className = `lbg-icon-button lbg-lock-button ${locked ? 'is-locked' : ''}`;
+    lockButton.textContent = locked ? '🔒' : '🔓';
+    lockButton.title = locked ? 'Unlock entry' : 'Lock entry: always include in prompt';
+    lockButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleLocked(state.settings, entry);
+        enforceEntryRules(state);
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    const blockButton = document.createElement('button');
+    blockButton.type = 'button';
+    blockButton.className = `lbg-icon-button lbg-block-button ${blocked ? 'is-blocked' : ''}`;
+    blockButton.textContent = '⊘';
+    blockButton.title = blocked ? 'Allow this entry again' : 'Never include this entry';
+    blockButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleBlocked(state.settings, entry);
+        enforceEntryRules(state);
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
     const favoriteButton = document.createElement('button');
     favoriteButton.type = 'button';
-    favoriteButton.className = `lbg-icon-button lbg-favorite-button ${isFavorite(state.settings, entry) ? 'is-favorite' : ''}`;
-    favoriteButton.textContent = isFavorite(state.settings, entry) ? '★' : '☆';
-    favoriteButton.title = isFavorite(state.settings, entry) ? 'Remove from favorites' : 'Add to favorites';
+    favoriteButton.className = `lbg-icon-button lbg-favorite-button ${favorite ? 'is-favorite' : ''}`;
+    favoriteButton.textContent = favorite ? '★' : '☆';
+    favoriteButton.title = favorite ? 'Remove from favorites' : 'Add to favorites';
     favoriteButton.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -600,6 +743,8 @@ function createEntryElement(entry, state, template, onToggle) {
 
     const menu = createEntryMenu(entry, state, template);
 
+    entryActions.appendChild(lockButton);
+    entryActions.appendChild(blockButton);
     entryActions.appendChild(favoriteButton);
     entryActions.appendChild(menuButton);
     entryActions.appendChild(menu);
@@ -631,6 +776,10 @@ function createEntryElement(entry, state, template, onToggle) {
     meta.appendChild(sourceBadge);
     meta.appendChild(matchBadge);
 
+    if (locked) meta.appendChild(createStatusBadge('Locked', 'lbg-lock-badge'));
+    if (blocked) meta.appendChild(createStatusBadge('Never include', 'lbg-block-badge'));
+    if (edited) meta.appendChild(createStatusBadge('Edited for this prompt', 'lbg-edit-badge'));
+
     const tags = createEntryTagRow(entry, state.settings);
 
     const keys = document.createElement('div');
@@ -639,7 +788,20 @@ function createEntryElement(entry, state, template, onToggle) {
 
     const preview = document.createElement('pre');
     preview.className = 'lbg-preview';
-    preview.textContent = shorten(entry.content, 500);
+    preview.textContent = shorten(getEntryPromptContent(entry), 500);
+
+    if (edited) {
+        const editHint = document.createElement('div');
+        editHint.className = 'lbg-edit-hint';
+        editHint.textContent = 'Temporary prompt version is shown below. Original lorebook entry is not changed.';
+        element.appendChild(top);
+        element.appendChild(meta);
+        if (tags.childElementCount) element.appendChild(tags);
+        element.appendChild(keys);
+        element.appendChild(editHint);
+        element.appendChild(preview);
+        return element;
+    }
 
     element.appendChild(top);
     element.appendChild(meta);
@@ -648,6 +810,13 @@ function createEntryElement(entry, state, template, onToggle) {
     element.appendChild(preview);
 
     return element;
+}
+
+function createStatusBadge(text, className) {
+    const badge = document.createElement('span');
+    badge.className = `lbg-status-badge ${className}`;
+    badge.textContent = text;
+    return badge;
 }
 
 function createEntryTagRow(entry, settings) {
@@ -669,6 +838,68 @@ function createEntryMenu(entry, state, template) {
     const currentTags = getEntryTags(state.settings, entry);
     const availableTags = getAllAvailableTags(state.settings);
     const standardTags = availableTags.filter((tag) => tag.type === 'standard');
+
+    const lockAction = document.createElement('button');
+    lockAction.type = 'button';
+    lockAction.className = 'lbg-menu-action';
+    lockAction.textContent = isLocked(state.settings, entry) ? 'Unlock entry' : 'Lock entry';
+    lockAction.title = 'Locked entries stay selected and are always included in the prompt.';
+    lockAction.addEventListener('click', () => {
+        toggleLocked(state.settings, entry);
+        enforceEntryRules(state);
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+    menu.appendChild(lockAction);
+
+    const blockAction = document.createElement('button');
+    blockAction.type = 'button';
+    blockAction.className = `lbg-menu-action ${isBlocked(state.settings, entry) ? '' : 'lbg-menu-danger'}`;
+    blockAction.textContent = isBlocked(state.settings, entry) ? 'Allow this entry again' : 'Never include this entry';
+    blockAction.title = 'Never include disables this entry even when keywords activate it.';
+    blockAction.addEventListener('click', () => {
+        toggleBlocked(state.settings, entry);
+        enforceEntryRules(state);
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+    menu.appendChild(blockAction);
+
+    const editAction = document.createElement('button');
+    editAction.type = 'button';
+    editAction.className = 'lbg-menu-action';
+    editAction.textContent = hasTemporaryEdit(entry) ? 'Edit temporary prompt version' : 'Edit for this prompt';
+    editAction.title = 'Temporarily changes only the prompt version. The original lorebook entry is not edited.';
+    editAction.addEventListener('click', async () => {
+        template.find('.lbg-entry-menu').removeClass('is-open');
+        const result = await showTemporaryEditDialog(entry);
+        if (!result) return;
+
+        if (result.action === 'reset') {
+            clearTemporaryEdit(entry);
+        } else if (result.action === 'save') {
+            setTemporaryEdit(entry, result.content);
+        }
+
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+    menu.appendChild(editAction);
+
+    if (hasTemporaryEdit(entry)) {
+        const resetEditAction = document.createElement('button');
+        resetEditAction.type = 'button';
+        resetEditAction.className = 'lbg-menu-action';
+        resetEditAction.textContent = 'Reset temporary edit';
+        resetEditAction.addEventListener('click', () => {
+            clearTemporaryEdit(entry);
+            renderLists(template, state);
+            updateStats(template, state);
+        });
+        menu.appendChild(resetEditAction);
+    }
 
     const favoriteAction = document.createElement('button');
     favoriteAction.type = 'button';
@@ -783,6 +1014,83 @@ function createEntryMenu(entry, state, template) {
     return menu;
 }
 
+function showTemporaryEditDialog(entry) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'lbg-edit-overlay';
+
+        const dialog = document.createElement('div');
+        dialog.className = 'lbg-edit-dialog';
+
+        const title = document.createElement('h3');
+        title.textContent = 'Edit for this prompt';
+
+        const subtitle = document.createElement('div');
+        subtitle.className = 'lbg-edit-subtitle';
+        subtitle.textContent = `${entry.bookName || 'Lorebook'} / ${entry.title || 'Entry'}`;
+
+        const hint = document.createElement('div');
+        hint.className = 'lbg-edit-hint';
+        hint.textContent = 'Original lorebook entry remains untouched. Temporary prompt version will be used only once.';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'text_pole lbg-edit-textarea';
+        textarea.value = getEntryPromptContent(entry);
+        textarea.spellcheck = false;
+
+        const footer = document.createElement('div');
+        footer.className = 'lbg-edit-footer';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'menu_button';
+        cancelButton.textContent = 'Cancel';
+
+        const resetButton = document.createElement('button');
+        resetButton.type = 'button';
+        resetButton.className = 'menu_button';
+        resetButton.textContent = 'Reset to original';
+        resetButton.disabled = !hasTemporaryEdit(entry);
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.className = 'menu_button lbg-edit-save-button';
+        saveButton.textContent = 'Use temporary version';
+
+        footer.appendChild(cancelButton);
+        footer.appendChild(resetButton);
+        footer.appendChild(saveButton);
+
+        dialog.appendChild(title);
+        dialog.appendChild(subtitle);
+        dialog.appendChild(hint);
+        dialog.appendChild(textarea);
+        dialog.appendChild(footer);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        const cleanup = (result) => {
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+            resolve(result);
+        };
+
+        function onKeyDown(event) {
+            if (event.key === 'Escape') cleanup(null);
+        }
+
+        cancelButton.addEventListener('click', () => cleanup(null), { once: true });
+        resetButton.addEventListener('click', () => cleanup({ action: 'reset' }), { once: true });
+        saveButton.addEventListener('click', () => cleanup({ action: 'save', content: textarea.value }), { once: true });
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) cleanup(null);
+        });
+        document.addEventListener('keydown', onKeyDown);
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+}
+
 function createMenuSectionTitle(text) {
     const title = document.createElement('div');
     title.className = 'lbg-menu-section-title';
@@ -860,7 +1168,7 @@ function filterEntries(entries, query, state) {
 
     return entries.filter((entry) => {
         const tagText = getEntryTags(state.settings, entry).join(' ');
-        const haystack = [entry.title, entry.bookName, entry.content, tagText, ...(entry.keys || []), ...(entry.secondaryKeys || [])]
+        const haystack = [entry.title, entry.bookName, entry.content, getEntryPromptContent(entry), tagText, ...(entry.keys || []), ...(entry.secondaryKeys || [])]
             .join(' ')
             .toLowerCase();
 
@@ -886,9 +1194,9 @@ function sortInactiveEntries(entries, sortMode, state) {
     const sorted = sortEntries(entries, sortMode, state);
 
     return sorted.sort((a, b) => {
-        const favoriteA = isFavorite(state.settings, a) ? 0 : 1;
-        const favoriteB = isFavorite(state.settings, b) ? 0 : 1;
-        if (favoriteA !== favoriteB) return favoriteA - favoriteB;
+        const statusA = getEntryStatusPriority(a, state.settings);
+        const statusB = getEntryStatusPriority(b, state.settings);
+        if (statusA !== statusB) return statusA - statusB;
 
         const priorityA = getInactivePriority(a, preferred);
         const priorityB = getInactivePriority(b, preferred);
@@ -901,6 +1209,13 @@ function sortInactiveEntries(entries, sortMode, state) {
 function getInactivePriority(entry, preferred) {
     if (preferred.has(entry.bookName)) return 0;
     return 1 + getSourcePriority(entry.sourceType);
+}
+
+function getEntryStatusPriority(entry, settings) {
+    if (isLocked(settings, entry)) return 0;
+    if (isBlocked(settings, entry)) return 3;
+    if (isFavorite(settings, entry)) return 1;
+    return 2;
 }
 
 function sortEntries(entries, sortMode, state) {
@@ -924,6 +1239,10 @@ function sortEntries(entries, sortMode, state) {
     }
 
     return result.sort((a, b) => {
+        const statusA = getEntryStatusPriority(a, state.settings);
+        const statusB = getEntryStatusPriority(b, state.settings);
+        if (statusA !== statusB) return statusA - statusB;
+
         const favoriteA = isFavorite(state.settings, a) ? 0 : 1;
         const favoriteB = isFavorite(state.settings, b) ? 0 : 1;
         return favoriteA - favoriteB;

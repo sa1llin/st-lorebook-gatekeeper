@@ -925,3 +925,156 @@ body.lbg-mobile-open {
         align-items: stretch;
     }
 }
+
+/* v0.1.10 lock / blacklist / temporary prompt edit. */
+.lbg-entry-locked {
+    border-color: rgba(88, 166, 255, 0.8) !important;
+    box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.12) inset;
+}
+
+.lbg-entry-blocked {
+    border-color: rgba(255, 107, 107, 0.72) !important;
+    opacity: 0.62;
+}
+
+.lbg-entry-edited {
+    border-style: solid;
+    box-shadow: 0 0 0 1px rgba(155, 108, 255, 0.16) inset;
+}
+
+.lbg-lock-button,
+.lbg-block-button {
+    font-size: 13px !important;
+}
+
+.lbg-lock-button.is-locked {
+    color: #58a6ff !important;
+    border-color: rgba(88, 166, 255, 0.7) !important;
+}
+
+.lbg-block-button.is-blocked {
+    color: #ff8f8f !important;
+    border-color: rgba(255, 107, 107, 0.72) !important;
+}
+
+.lbg-status-badge {
+    border: 1px solid #343434;
+    border-radius: 999px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    font-size: 0.95em;
+}
+
+.lbg-lock-badge {
+    color: #9ecbff;
+    border-color: rgba(88, 166, 255, 0.65);
+}
+
+.lbg-block-badge {
+    color: #ffb0b0;
+    border-color: rgba(255, 107, 107, 0.65);
+}
+
+.lbg-edit-badge {
+    color: #d8c4ff;
+    border-color: rgba(155, 108, 255, 0.65);
+}
+
+.lbg-edit-hint {
+    margin-top: 6px;
+    font-size: 0.82em;
+    opacity: 0.78;
+}
+
+.lbg-edit-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.lbg-edit-dialog {
+    width: min(860px, 96vw);
+    max-height: min(760px, 92vh);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid #343434;
+    border-radius: 12px;
+    background: #171717;
+    color: #dcddd8;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+.lbg-edit-dialog h3 {
+    margin: 0;
+}
+
+.lbg-edit-subtitle {
+    font-size: 0.9em;
+    opacity: 0.78;
+    overflow-wrap: anywhere;
+}
+
+.lbg-edit-textarea {
+    width: 100% !important;
+    min-height: 360px;
+    resize: vertical;
+    white-space: pre-wrap;
+    font-family: var(--monoFontFamily, monospace);
+}
+
+.lbg-edit-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.lbg-edit-save-button {
+    font-weight: 700 !important;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+    .lbg-entry-actions {
+        gap: 4px !important;
+    }
+
+    .lbg-icon-button,
+    .lbg-favorite-button,
+    .lbg-menu-button {
+        width: 24px !important;
+        height: 24px !important;
+        min-width: 24px !important;
+        font-size: 14px !important;
+    }
+
+    .lbg-edit-overlay {
+        align-items: stretch;
+        padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+    }
+
+    .lbg-edit-dialog {
+        width: 100%;
+        max-height: none;
+    }
+
+    .lbg-edit-textarea {
+        flex: 1;
+        min-height: 45vh;
+    }
+
+    .lbg-edit-footer {
+        flex-direction: column-reverse;
+    }
+
+    .lbg-edit-footer .menu_button {
+        width: 100%;
+        min-height: 38px;
+    }
+}
