@@ -1276,6 +1276,12 @@ function showTemporaryEditDialog(entry) {
         textarea.value = getEntryPromptContent(entry);
         textarea.spellcheck = false;
 
+        const resizeHandle = document.createElement('button');
+        resizeHandle.type = 'button';
+        resizeHandle.className = 'lbg-edit-resize-handle';
+        resizeHandle.textContent = '↕ Drag to resize';
+        resizeHandle.setAttribute('aria-label', 'Drag up or down to resize the temporary prompt editor');
+
         const footer = document.createElement('div');
         footer.className = 'lbg-edit-footer';
 
@@ -1303,13 +1309,17 @@ function showTemporaryEditDialog(entry) {
         dialog.appendChild(subtitle);
         dialog.appendChild(hint);
         dialog.appendChild(textarea);
+        dialog.appendChild(resizeHandle);
         dialog.appendChild(footer);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
         document.body.classList.add('lbg-edit-open');
 
+        const cleanupResize = setupTemporaryEditResize(dialog, resizeHandle);
+
         const cleanup = (result) => {
             document.removeEventListener('keydown', onKeyDown);
+            cleanupResize?.();
             document.body.classList.remove('lbg-edit-open');
             overlay.remove();
             resolve(result);
@@ -1329,6 +1339,84 @@ function showTemporaryEditDialog(entry) {
         textarea.focus();
         textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     });
+}
+
+
+function setupTemporaryEditResize(dialog, resizeHandle) {
+    const STORAGE_KEY = 'lbg.temporaryEditDialogHeight';
+    const MIN_DIALOG_HEIGHT = 360;
+    let startY = 0;
+    let startHeight = 0;
+    let activePointerId = null;
+
+    const getMaxHeight = () => Math.max(MIN_DIALOG_HEIGHT, Math.floor(window.innerHeight * 0.94));
+    const getDefaultHeight = () => Math.max(Math.floor(window.innerHeight * 0.5), Math.min(620, getMaxHeight()));
+    const clampHeight = (height) => Math.min(getMaxHeight(), Math.max(MIN_DIALOG_HEIGHT, Math.floor(height)));
+
+    const applyHeight = (height, persist = false) => {
+        const nextHeight = clampHeight(height);
+        dialog.style.height = `${nextHeight}px`;
+        dialog.style.maxHeight = `${getMaxHeight()}px`;
+        if (persist) {
+            try {
+                localStorage.setItem(STORAGE_KEY, String(nextHeight));
+            } catch (_error) {
+                // Silently ignore unavailable storage in restricted contexts.
+            }
+        }
+    };
+
+    let savedHeight = 0;
+    try {
+        savedHeight = Number.parseInt(localStorage.getItem(STORAGE_KEY) || '', 10) || 0;
+    } catch (_error) {
+        savedHeight = 0;
+    }
+    applyHeight(savedHeight || getDefaultHeight(), false);
+
+    const onPointerMove = (event) => {
+        if (activePointerId !== event.pointerId) return;
+        event.preventDefault();
+        applyHeight(startHeight + (event.clientY - startY), true);
+    };
+
+    const finishResize = (event) => {
+        if (activePointerId !== event.pointerId) return;
+        activePointerId = null;
+        resizeHandle.classList.remove('is-resizing');
+        document.body.classList.remove('lbg-edit-resizing');
+        resizeHandle.releasePointerCapture?.(event.pointerId);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', finishResize);
+        window.removeEventListener('pointercancel', finishResize);
+    };
+
+    resizeHandle.addEventListener('pointerdown', (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        event.preventDefault();
+        activePointerId = event.pointerId;
+        startY = event.clientY;
+        startHeight = dialog.getBoundingClientRect().height;
+        resizeHandle.classList.add('is-resizing');
+        document.body.classList.add('lbg-edit-resizing');
+        resizeHandle.setPointerCapture?.(event.pointerId);
+        window.addEventListener('pointermove', onPointerMove, { passive: false });
+        window.addEventListener('pointerup', finishResize);
+        window.addEventListener('pointercancel', finishResize);
+    });
+
+    const onWindowResize = () => applyHeight(dialog.getBoundingClientRect().height, false);
+    window.addEventListener('resize', onWindowResize, { passive: true });
+
+    return () => {
+        activePointerId = null;
+        resizeHandle.classList.remove('is-resizing');
+        document.body.classList.remove('lbg-edit-resizing');
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', finishResize);
+        window.removeEventListener('pointercancel', finishResize);
+        window.removeEventListener('resize', onWindowResize);
+    };
 }
 
 function createMenuSectionTitle(text) {

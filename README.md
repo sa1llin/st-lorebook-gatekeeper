@@ -153,3 +153,9 @@
 - Previous request choice remains compatible.
 - Inactive lorebook prioritization remains compatible.
 - Prompt Itemization correction remains compatible.
+
+### v0.1.13
+
+- `Edit for this prompt` теперь открывается как крупное окно минимум на половину высоты экрана.
+- Добавлена отдельная ручка `Drag to resize`, через которую можно менять высоту временного редактора вверх-вниз.
+- Последняя выбранная высота редактора сохраняется локально для следующих открытий.
