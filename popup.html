@@ -27,16 +27,26 @@
 
     <div class="lbg-tag-filter-panel">
         <div class="lbg-filter-header">
-            <strong>Filter by tags</strong>
+            <div class="lbg-filter-title">
+                <strong>Tags</strong>
+                <span id="lbgSelectedTagCount" class="lbg-muted">0 selected</span>
+            </div>
             <div class="lbg-filter-actions">
-                <select id="lbgTagFilterMode" class="text_pole" title="Tag filter mode">
-                    <option value="or">OR: any selected tag</option>
-                    <option value="and">AND: all selected tags</option>
+                <select id="lbgTagFilterMode" class="text_pole lbg-compact-select" title="Tag filter mode">
+                    <option value="or">OR</option>
+                    <option value="and">AND</option>
                 </select>
-                <button id="lbgClearTagFilter" type="button" class="menu_button">Clear tags</button>
+                <button id="lbgClearTagFilter" type="button" class="menu_button lbg-small-button">Clear</button>
+                <button id="lbgOpenTagManager" type="button" class="menu_button lbg-small-button">Manage</button>
             </div>
         </div>
         <div id="lbgTagFilterList" class="lbg-tag-filter-list"></div>
+
+        <details id="lbgTagManager" class="lbg-tag-manager-panel">
+            <summary>Tag manager</summary>
+            <div class="lbg-tag-manager-hint">Delete custom tags completely or clear standard tags from all entries.</div>
+            <div id="lbgTagManagerList" class="lbg-tag-manager-list"></div>
+        </details>
     </div>
 
     <div class="lbg-actions">

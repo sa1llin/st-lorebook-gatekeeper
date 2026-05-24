@@ -162,6 +162,45 @@ export function getAllAvailableTags(settings) {
     });
 }
 
+
+export function getTagUsageCounts(settings) {
+    ensureEntryMetaSettings(settings);
+
+    const counts = {};
+    for (const entryTags of Object.values(settings.entryTags || {})) {
+        for (const tagName of toStringArray(entryTags).map(normalizeTagName).filter(Boolean)) {
+            counts[tagName] = (counts[tagName] || 0) + 1;
+        }
+    }
+
+    return counts;
+}
+
+export function deleteTagGlobally(settings, rawTagName) {
+    ensureEntryMetaSettings(settings);
+    const tagName = normalizeTagName(rawTagName);
+    if (!tagName) return false;
+
+    const isStandardTag = DEFAULT_TAGS.some((tag) => tag.name === tagName);
+
+    for (const [entryId, entryTags] of Object.entries(settings.entryTags || {})) {
+        const nextTags = toStringArray(entryTags).map(normalizeTagName).filter((tag) => tag && tag !== tagName);
+        if (nextTags.length) settings.entryTags[entryId] = [...new Set(nextTags)];
+        else delete settings.entryTags[entryId];
+    }
+
+    if (!isStandardTag) {
+        delete settings.customTags[tagName];
+        delete settings.tagColors[tagName];
+    }
+
+    if (settings.tagFilter && Array.isArray(settings.tagFilter.selectedTags)) {
+        settings.tagFilter.selectedTags = settings.tagFilter.selectedTags.filter((tag) => normalizeTagName(tag) !== tagName);
+    }
+
+    return true;
+}
+
 export function getTagColor(settings, rawTagName) {
     ensureEntryMetaSettings(settings);
     const tagName = normalizeTagName(rawTagName);

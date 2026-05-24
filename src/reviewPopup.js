@@ -21,11 +21,13 @@ import {
 } from './choiceMemory.js';
 import {
     addEntryTag,
+    deleteTagGlobally,
     ensureEntryMetaSettings,
     formatTagLabel,
     getAllAvailableTags,
     getEntryTags,
     getTagColor,
+    getTagUsageCounts,
     isFavorite,
     normalizeTagName,
     removeEntryTag,
@@ -48,6 +50,7 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
 
     initializeControls(template, state);
     renderTagFilterList(template, state);
+    renderTagManagerList(template, state);
     renderLists(template, state);
     updateStats(template, state);
 
@@ -185,8 +188,40 @@ function initializeControls(template, state) {
         state.settings.tagFilter.selectedTags = [];
         persistState(state);
         renderTagFilterList(template, state);
+        renderTagManagerList(template, state);
         renderLists(template, state);
         updateStats(template, state);
+    });
+
+    template.find('#lbgOpenTagManager').on('click', () => {
+        const manager = template.find('#lbgTagManager');
+        manager.prop('open', !Boolean(manager.prop('open')));
+        renderTagManagerList(template, state);
+    });
+
+    template.on('click', '.lbg-menu-button', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const menu = $(event.currentTarget).closest('.lbg-entry-actions').find('.lbg-entry-menu');
+        const isOpen = menu.hasClass('is-open');
+
+        template.find('.lbg-entry-menu').removeClass('is-open');
+        template.find('.lbg-menu-button').attr('aria-expanded', 'false');
+
+        if (!isOpen) {
+            menu.addClass('is-open');
+            $(event.currentTarget).attr('aria-expanded', 'true');
+        }
+    });
+
+    template.on('click', '.lbg-entry-menu', (event) => {
+        event.stopPropagation();
+    });
+
+    $(document).off('click.lbgEntryMenu').on('click.lbgEntryMenu', () => {
+        template.find('.lbg-entry-menu').removeClass('is-open');
+        template.find('.lbg-menu-button').attr('aria-expanded', 'false');
     });
 
     template.find('#lbgInactiveBookFilter').on('change', () => {
@@ -328,6 +363,7 @@ function renderTagFilterList(template, state) {
     const selectedTags = new Set(state.settings.tagFilter?.selectedTags || []);
 
     container.empty();
+    template.find('#lbgSelectedTagCount').text(`${selectedTags.size} selected`);
 
     if (!availableTags.length) {
         container.append(createNoticeElement('No tags available.'));
@@ -350,11 +386,68 @@ function renderTagFilterList(template, state) {
             state.settings.tagFilter.selectedTags = [...next];
             persistState(state);
             renderTagFilterList(template, state);
+            renderTagManagerList(template, state);
             renderLists(template, state);
             updateStats(template, state);
         });
 
         container.append(button);
+    }
+}
+
+function renderTagManagerList(template, state) {
+    const container = template.find('#lbgTagManagerList');
+    if (!container.length) return;
+
+    const tags = getAllAvailableTags(state.settings);
+    const usageCounts = getTagUsageCounts(state.settings);
+    container.empty();
+
+    if (!tags.length) {
+        container.append(createNoticeElement('No tags available.'));
+        return;
+    }
+
+    for (const tag of tags) {
+        const row = document.createElement('div');
+        row.className = 'lbg-tag-manager-row';
+
+        const chip = createStaticTagChip(tag.name, state.settings);
+        chip.classList.add('lbg-tag-manager-chip');
+
+        const meta = document.createElement('span');
+        meta.className = 'lbg-tag-manager-meta';
+        meta.textContent = `${tag.type} • ${usageCounts[tag.name] || 0} use${usageCounts[tag.name] === 1 ? '' : 's'}`;
+
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'menu_button lbg-small-button lbg-tag-delete-button';
+        action.textContent = tag.type === 'standard' ? 'Clear from entries' : 'Delete';
+        action.disabled = tag.type === 'standard' && !usageCounts[tag.name];
+        action.title = tag.type === 'standard'
+            ? 'Remove this standard tag from all entries. The standard tag itself stays available.'
+            : 'Delete this custom tag and remove it from all entries.';
+
+        action.addEventListener('click', () => {
+            const confirmed = window.confirm(
+                tag.type === 'standard'
+                    ? `Remove the standard tag "${tag.label}" from all entries?`
+                    : `Delete the custom tag "${tag.label}" everywhere?`,
+            );
+            if (!confirmed) return;
+
+            deleteTagGlobally(state.settings, tag.name);
+            persistState(state);
+            renderTagFilterList(template, state);
+            renderTagManagerList(template, state);
+            renderLists(template, state);
+            updateStats(template, state);
+        });
+
+        row.appendChild(chip);
+        row.appendChild(meta);
+        row.appendChild(action);
+        container.append(row);
     }
 }
 
@@ -483,13 +576,9 @@ function createEntryElement(entry, state, template, onToggle) {
     const entryActions = document.createElement('div');
     entryActions.className = 'lbg-entry-actions';
 
-    const tokenBadge = document.createElement('span');
-    tokenBadge.className = 'lbg-token-badge';
-    tokenBadge.textContent = `${entry.tokens || 0} tokens`;
-
     const favoriteButton = document.createElement('button');
     favoriteButton.type = 'button';
-    favoriteButton.className = `lbg-favorite-button ${isFavorite(state.settings, entry) ? 'is-favorite' : ''}`;
+    favoriteButton.className = `lbg-icon-button lbg-favorite-button ${isFavorite(state.settings, entry) ? 'is-favorite' : ''}`;
     favoriteButton.textContent = isFavorite(state.settings, entry) ? '★' : '☆';
     favoriteButton.title = isFavorite(state.settings, entry) ? 'Remove from favorites' : 'Add to favorites';
     favoriteButton.addEventListener('click', (event) => {
@@ -501,14 +590,29 @@ function createEntryElement(entry, state, template, onToggle) {
         updateStats(template, state);
     });
 
-    entryActions.appendChild(tokenBadge);
+    const menuButton = document.createElement('button');
+    menuButton.type = 'button';
+    menuButton.className = 'lbg-icon-button lbg-menu-button';
+    menuButton.textContent = '⋯';
+    menuButton.title = 'Entry actions';
+    menuButton.setAttribute('aria-haspopup', 'true');
+    menuButton.setAttribute('aria-expanded', 'false');
+
+    const menu = createEntryMenu(entry, state, template);
+
     entryActions.appendChild(favoriteButton);
+    entryActions.appendChild(menuButton);
+    entryActions.appendChild(menu);
 
     top.appendChild(label);
     top.appendChild(entryActions);
 
     const meta = document.createElement('div');
     meta.className = 'lbg-entry-meta';
+
+    const tokenBadge = document.createElement('span');
+    tokenBadge.className = 'lbg-token-badge';
+    tokenBadge.textContent = `${entry.tokens || 0} tokens`;
 
     const bookBadge = document.createElement('span');
     bookBadge.className = 'lbg-book-badge';
@@ -522,16 +626,16 @@ function createEntryElement(entry, state, template, onToggle) {
     matchBadge.className = 'lbg-match-badge';
     matchBadge.textContent = entry.originallyActive ? `match: ${entry.matchType}` : 'manual candidate';
 
-    const keys = document.createElement('span');
-    keys.className = 'lbg-keys';
-    keys.textContent = buildKeysText(entry);
-
+    meta.appendChild(tokenBadge);
     meta.appendChild(bookBadge);
     meta.appendChild(sourceBadge);
     meta.appendChild(matchBadge);
-    meta.appendChild(keys);
 
-    const tags = createTagsElement(entry, state, template);
+    const tags = createEntryTagRow(entry, state.settings);
+
+    const keys = document.createElement('div');
+    keys.className = 'lbg-keys';
+    keys.textContent = buildKeysText(entry);
 
     const preview = document.createElement('pre');
     preview.className = 'lbg-preview';
@@ -539,54 +643,73 @@ function createEntryElement(entry, state, template, onToggle) {
 
     element.appendChild(top);
     element.appendChild(meta);
-    element.appendChild(tags);
+    if (tags.childElementCount) element.appendChild(tags);
+    element.appendChild(keys);
     element.appendChild(preview);
 
     return element;
 }
 
-function createTagsElement(entry, state, template) {
+function createEntryTagRow(entry, settings) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'lbg-entry-tags';
+    wrapper.className = 'lbg-entry-tags lbg-entry-tags-compact';
 
-    const tags = getEntryTags(state.settings, entry);
+    const tags = getEntryTags(settings, entry);
     for (const tagName of tags) {
-        wrapper.appendChild(createTagChip(tagName, entry, state, template));
+        wrapper.appendChild(createStaticTagChip(tagName, settings));
     }
 
-    const addArea = document.createElement('div');
-    addArea.className = 'lbg-add-tag-area';
+    return wrapper;
+}
 
-    const select = document.createElement('select');
-    select.className = 'text_pole lbg-tag-select';
-    select.appendChild(createOption('', '+ standard tag'));
+function createEntryMenu(entry, state, template) {
+    const menu = document.createElement('div');
+    menu.className = 'lbg-entry-menu';
 
-    for (const tag of getAllAvailableTags(state.settings)) {
-        const option = createOption(tag.name, tag.label);
-        option.disabled = tags.includes(tag.name);
-        select.appendChild(option);
-    }
+    const currentTags = getEntryTags(state.settings, entry);
+    const availableTags = getAllAvailableTags(state.settings);
+    const standardTags = availableTags.filter((tag) => tag.type === 'standard');
 
-    select.addEventListener('change', () => {
-        const tagName = normalizeTagName(select.value);
-        if (!tagName) return;
-
-        addEntryTag(state.settings, entry, tagName);
+    const favoriteAction = document.createElement('button');
+    favoriteAction.type = 'button';
+    favoriteAction.className = 'lbg-menu-action';
+    favoriteAction.textContent = isFavorite(state.settings, entry) ? 'Remove from favorites' : 'Add to favorites';
+    favoriteAction.addEventListener('click', () => {
+        toggleFavorite(state.settings, entry);
         persistState(state);
-        renderTagFilterList(template, state);
         renderLists(template, state);
         updateStats(template, state);
     });
+    menu.appendChild(favoriteAction);
+
+    menu.appendChild(createMenuSectionTitle('Standard tags'));
+    const standardGrid = document.createElement('div');
+    standardGrid.className = 'lbg-menu-tag-grid';
+
+    for (const tag of standardTags) {
+        const tagButton = createMenuTagButton(tag, state.settings, currentTags.includes(tag.name));
+        tagButton.addEventListener('click', () => {
+            addEntryTag(state.settings, entry, tag.name);
+            refreshTagDependentViews(template, state);
+        });
+        standardGrid.appendChild(tagButton);
+    }
+
+    menu.appendChild(standardGrid);
+
+    menu.appendChild(createMenuSectionTitle('Custom tag'));
+    const customRow = document.createElement('div');
+    customRow.className = 'lbg-menu-custom-row';
 
     const input = document.createElement('input');
-    input.className = 'text_pole lbg-custom-tag-input';
+    input.className = 'text_pole lbg-menu-custom-input';
     input.type = 'text';
-    input.placeholder = 'Custom tag...';
+    input.placeholder = 'Type custom tag...';
     input.maxLength = 40;
 
     const addButton = document.createElement('button');
     addButton.type = 'button';
-    addButton.className = 'menu_button lbg-add-tag-button';
+    addButton.className = 'menu_button lbg-small-button';
     addButton.textContent = 'Add';
 
     const addCustomTag = () => {
@@ -595,10 +718,7 @@ function createTagsElement(entry, state, template) {
 
         addEntryTag(state.settings, entry, tagName);
         input.value = '';
-        persistState(state);
-        renderTagFilterList(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshTagDependentViews(template, state);
     };
 
     addButton.addEventListener('click', addCustomTag);
@@ -609,19 +729,83 @@ function createTagsElement(entry, state, template) {
         }
     });
 
-    addArea.appendChild(select);
-    addArea.appendChild(input);
-    addArea.appendChild(addButton);
-    wrapper.appendChild(addArea);
+    customRow.appendChild(input);
+    customRow.appendChild(addButton);
+    menu.appendChild(customRow);
 
-    return wrapper;
+    if (currentTags.length) {
+        menu.appendChild(createMenuSectionTitle('Remove from this entry'));
+        const removeGrid = document.createElement('div');
+        removeGrid.className = 'lbg-menu-tag-grid';
+
+        for (const tagName of currentTags) {
+            const tag = {
+                name: tagName,
+                label: formatTagLabel(tagName),
+                color: getTagColor(state.settings, tagName),
+            };
+            const removeButton = createMenuTagButton(tag, state.settings, false, '× ');
+            removeButton.addEventListener('click', () => {
+                removeEntryTag(state.settings, entry, tagName);
+                refreshTagDependentViews(template, state);
+            });
+            removeGrid.appendChild(removeButton);
+        }
+
+        menu.appendChild(removeGrid);
+
+        const clearEntryTags = document.createElement('button');
+        clearEntryTags.type = 'button';
+        clearEntryTags.className = 'lbg-menu-action lbg-menu-danger';
+        clearEntryTags.textContent = 'Clear all tags from this entry';
+        clearEntryTags.addEventListener('click', () => {
+            for (const tagName of currentTags) {
+                removeEntryTag(state.settings, entry, tagName);
+            }
+            refreshTagDependentViews(template, state);
+        });
+        menu.appendChild(clearEntryTags);
+    }
+
+    const manageTags = document.createElement('button');
+    manageTags.type = 'button';
+    manageTags.className = 'lbg-menu-action';
+    manageTags.textContent = 'Open tag manager';
+    manageTags.addEventListener('click', () => {
+        const manager = template.find('#lbgTagManager');
+        manager.prop('open', true);
+        renderTagManagerList(template, state);
+        manager[0]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        template.find('.lbg-entry-menu').removeClass('is-open');
+    });
+    menu.appendChild(manageTags);
+
+    return menu;
 }
 
-function createTagChip(tagName, entry, state, template) {
-    const color = getTagColor(state.settings, tagName);
+function createMenuSectionTitle(text) {
+    const title = document.createElement('div');
+    title.className = 'lbg-menu-section-title';
+    title.textContent = text;
+    return title;
+}
+
+function createMenuTagButton(tag, settings, disabled = false, prefix = '') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'lbg-menu-tag-button';
+    button.style.setProperty('--tag-color', tag.color || getTagColor(settings, tag.name));
+    button.textContent = `${prefix}${tag.label || formatTagLabel(tag.name)}`;
+    button.disabled = disabled;
+    return button;
+}
+
+function createStaticTagChip(tagName, settings) {
+    const color = getTagColor(settings, tagName);
     const chip = document.createElement('span');
-    chip.className = 'lbg-tag';
+    chip.className = 'lbg-tag lbg-tag-compact';
     chip.style.setProperty('--tag-color', color);
+    chip.title = formatTagLabel(tagName);
 
     const dot = document.createElement('span');
     dot.className = 'lbg-tag-dot';
@@ -630,24 +814,18 @@ function createTagChip(tagName, entry, state, template) {
     label.className = 'lbg-tag-label';
     label.textContent = formatTagLabel(tagName);
 
-    const removeButton = document.createElement('button');
-    removeButton.type = 'button';
-    removeButton.className = 'lbg-tag-remove';
-    removeButton.textContent = '×';
-    removeButton.title = 'Remove tag';
-    removeButton.addEventListener('click', () => {
-        removeEntryTag(state.settings, entry, tagName);
-        persistState(state);
-        renderTagFilterList(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
-    });
-
     chip.appendChild(dot);
     chip.appendChild(label);
-    chip.appendChild(removeButton);
 
     return chip;
+}
+
+function refreshTagDependentViews(template, state) {
+    persistState(state);
+    renderTagFilterList(template, state);
+    renderTagManagerList(template, state);
+    renderLists(template, state);
+    updateStats(template, state);
 }
 
 function createNoticeElement(text) {

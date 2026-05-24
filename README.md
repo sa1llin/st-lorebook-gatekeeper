@@ -10,8 +10,19 @@
 
 2. Вставьте ссылку в соответствующее поле в SillyTavern "Установить расширение".
 3. ВАЖНО: выберите "Установить для всех пользователей".
-4. Перезапустите SillyTavern.
 
+## Альтернативный вариант установки из архива
+
+1. Удалите старую папку расширения, если ранее была установлена:
+
+   `SillyTavern/public/scripts/extensions/third-party/st-lorebook-gatekeeper`
+
+2. Распакуйте новую папку `st-lorebook-gatekeeper` сюда:
+
+   `SillyTavern/public/scripts/extensions/third-party/`
+
+3. Перезапустите SillyTavern.
+4. Очистите кэш браузера или выполните жёсткое обновление.
 
 ## Возможности
 
@@ -25,12 +36,39 @@
 - Previous request choice для быстрого повторного применения выбора после reroll/swipe.
 - Приоритетный выбор inactive-лорбуков без отключения режима All lorebooks.
 - Коррекция Prompt Itemization после подтверждения изменений в расширении.
-- Избранные записи через звёздочку.
+- Избранные записи через звёздочку в правом верхнем углу карточки.
 - Закрепление избранных записей выше остальных в активном и неактивном списке.
 - Стандартные тэги для записей.
 - Кастомные пользовательские тэги.
 - Цветные тэги с постоянным цветом для каждого имени тэга.
-- Фильтрация записей по тэгам в режимах OR и AND.
+- Компактная фильтрация записей по тэгам в режимах OR и AND.
+- Меню `⋯` для добавления, снятия и управления тэгами внутри карточки.
+- Tag Manager для удаления кастомных тэгов и очистки стандартных тэгов со всех записей.
+
+
+## v0.1.9
+
+### Changed
+
+- Moved the favorite star to the top-right action area of each entry card.
+- Reworked entry tags into compact colored chips near entry metadata.
+- Removed always-visible tag editors from entry cards.
+- Moved standard tag selection and custom tag creation into the entry `⋯` menu.
+- Made the tag filter panel more compact for desktop and mobile layouts.
+
+### Added
+
+- Entry action menu with favorite toggle, standard tag assignment, custom tag input, per-entry tag removal and clear-all-tags action.
+- Tag Manager inside the tag filter panel.
+- Global deletion for custom tags.
+- Global cleanup for standard tags from all entries while keeping default standard tags available.
+- Tag usage counts in Tag Manager.
+
+### Preserved
+
+- Original lorebook / World Info entries are still not modified.
+- Prompt patching remains generation-scoped.
+- Remembered choice and previous request choice remain compatible.
 
 ## v0.1.8
 
