@@ -23,6 +23,10 @@
             <option value="book">Book name</option>
             <option value="title">Entry title</option>
         </select>
+        <select id="lbgViewMode" class="text_pole lbg-view-mode-select" title="Card view mode">
+            <option value="detailed">Detailed View</option>
+            <option value="compact">Compact View</option>
+        </select>
     </div>
 
     <div class="lbg-tag-filter-panel">
@@ -69,11 +73,13 @@
 
         <div class="lbg-memory-actions">
             <button id="lbgApplyRememberedChoice" type="button" class="menu_button">Apply remembered choice</button>
+            <button id="lbgCompareRememberedChoice" type="button" class="menu_button">Compare with remembered</button>
             <button id="lbgApplyPreviousChoice" type="button" class="menu_button">Apply previous request choice</button>
             <button id="lbgClearRememberedChoice" type="button" class="menu_button">Clear remembered choice</button>
         </div>
 
         <div id="lbgRememberedChoiceInfo" class="lbg-memory-info">No remembered choice.</div>
+        <div id="lbgRememberedCompareInfo" class="lbg-compare-info" hidden></div>
         <div id="lbgPreviousChoiceInfo" class="lbg-memory-info">No previous request choice.</div>
     </div>
 

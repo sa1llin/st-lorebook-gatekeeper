@@ -21,6 +21,7 @@ export const defaultSettings = {
         mode: 'or',
     },
     favoritesMode: 'pin',
+    compactView: false,
 };
 
 export function getSettings() {
@@ -55,6 +56,7 @@ function normalizeSettings(settings) {
     normalized.favoritesMode = ['pin', 'section', 'both'].includes(normalized.favoritesMode)
         ? normalized.favoritesMode
         : 'pin';
+    normalized.compactView = Boolean(normalized.compactView);
 
     normalized.tagFilter = {
         selectedTags: toStringArray(normalized.tagFilter?.selectedTags).map(normalizeTagName).filter(Boolean),

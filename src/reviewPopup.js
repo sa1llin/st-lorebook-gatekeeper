@@ -50,6 +50,7 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
         rememberedChoice: loadRememberedChoice(),
         previousChoice: loadPreviousChoice(),
         inactiveBookFilter: ALL_LOREBOOKS_FILTER,
+        compareRememberedVisible: false,
     };
     enforceEntryRules(state);
 
@@ -108,6 +109,8 @@ function createStateEntry(entry, selected, originallyActive, settings) {
         content,
         selected,
         originallyActive,
+        matchedKeywords: toStringArray(entry.matchedKeywords),
+        selectionSource: entry.selectionSource || '',
     };
 
     applyEntryRule(stateEntry, settings);
@@ -235,6 +238,7 @@ function showMobileReviewOverlay(template, cancelGenerationButton) {
 
 function initializeControls(template, state) {
     template.find('#lbgSort').val(state.settings.sortMode || 'tokens_desc');
+    template.find('#lbgViewMode').val(state.settings.compactView ? 'compact' : 'detailed');
     template.find('#lbgShowInactive').prop('checked', Boolean(state.settings.showInactiveEntries));
     template.find('#lbgTagFilterMode').val(state.settings.tagFilter?.mode || 'or');
 
@@ -248,6 +252,13 @@ function initializeControls(template, state) {
 
     template.find('#lbgSort').on('change', () => {
         state.settings.sortMode = template.find('#lbgSort').val();
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    template.find('#lbgViewMode').on('change', () => {
+        state.settings.compactView = template.find('#lbgViewMode').val() === 'compact';
         persistState(state);
         renderLists(template, state);
         updateStats(template, state);
@@ -338,6 +349,7 @@ function initializeControls(template, state) {
         }
 
         applyRememberedChoiceToState(state, state.rememberedChoice);
+        markChoiceAppliedToState(state, state.rememberedChoice, 'remembered');
         enforceEntryRules(state);
         renderLists(template, state);
         updateStats(template, state);
@@ -354,6 +366,7 @@ function initializeControls(template, state) {
         }
 
         applyPreviousChoiceToState(state, state.previousChoice);
+        markChoiceAppliedToState(state, state.previousChoice, 'previous');
         enforceEntryRules(state);
         renderLists(template, state);
         updateStats(template, state);
@@ -361,9 +374,21 @@ function initializeControls(template, state) {
         toastr.success('Lorebook Gatekeeper: previous request choice applied.');
     });
 
+    template.find('#lbgCompareRememberedChoice').on('click', () => {
+        state.rememberedChoice = loadRememberedChoice();
+        if (!state.rememberedChoice) {
+            state.compareRememberedVisible = false;
+            toastr.info('Lorebook Gatekeeper: no remembered choice to compare.');
+        } else {
+            state.compareRememberedVisible = !state.compareRememberedVisible;
+        }
+        updateChoiceInfo(template, state);
+    });
+
     template.find('#lbgClearRememberedChoice').on('click', () => {
         clearRememberedChoice();
         state.rememberedChoice = null;
+        state.compareRememberedVisible = false;
         updateChoiceInfo(template, state);
         toastr.info('Lorebook Gatekeeper: remembered choice cleared.');
     });
@@ -372,9 +397,13 @@ function initializeControls(template, state) {
 
     template.find('#lbgDisableAllActive').on('click', () => {
         state.activeEntries.forEach((entry) => {
-            if (!isLocked(state.settings, entry) && !isBlocked(state.settings, entry)) entry.selected = false;
+            if (!isLocked(state.settings, entry) && !isBlocked(state.settings, entry)) {
+                entry.selected = false;
+                delete entry.selectionSource;
+            }
         });
         enforceEntryRules(state);
+        updateChoiceInfo(template, state);
         renderLists(template, state);
         updateStats(template, state);
     });
@@ -382,8 +411,10 @@ function initializeControls(template, state) {
     template.find('#lbgEnableAllActive').on('click', () => {
         state.activeEntries.forEach((entry) => {
             entry.selected = !isBlocked(state.settings, entry);
+            delete entry.selectionSource;
         });
         enforceEntryRules(state);
+        updateChoiceInfo(template, state);
         renderLists(template, state);
         updateStats(template, state);
     });
@@ -584,8 +615,186 @@ function updateChoiceInfo(template, state) {
     template.find('#lbgRememberedChoiceInfo').text(formatRememberedChoiceInfo(state.rememberedChoice));
     template.find('#lbgPreviousChoiceInfo').text(formatPreviousChoiceInfo(state.previousChoice));
     template.find('#lbgApplyRememberedChoice').prop('disabled', !state.rememberedChoice);
+    template.find('#lbgCompareRememberedChoice').prop('disabled', !state.rememberedChoice);
     template.find('#lbgClearRememberedChoice').prop('disabled', !state.rememberedChoice);
     template.find('#lbgApplyPreviousChoice').prop('disabled', !state.previousChoice);
+
+    const compare = template.find('#lbgRememberedCompareInfo');
+    if (!state.compareRememberedVisible || !state.rememberedChoice) {
+        compare.prop('hidden', true).empty();
+        return;
+    }
+
+    compare.prop('hidden', false).empty().append(createRememberedCompareElement(state));
+}
+
+function markChoiceAppliedToState(state, choice, source) {
+    const selectedIds = new Set([
+        ...toStringArray(choice?.selectedActiveIds),
+        ...toStringArray(choice?.manualEntryIds),
+    ]);
+
+    for (const entry of [...state.activeEntries, ...state.inactiveEntries]) {
+        if (selectedIds.has(entry.id) && entry.selected) {
+            entry.selectionSource = source;
+        } else if (entry.selectionSource === source) {
+            delete entry.selectionSource;
+        }
+    }
+}
+
+function updateSelectionSourceAfterUserToggle(entry) {
+    if (!entry.selected) {
+        delete entry.selectionSource;
+        return;
+    }
+
+    if (!entry.originallyActive) {
+        entry.selectionSource = 'manual';
+        return;
+    }
+
+    delete entry.selectionSource;
+}
+
+function createRememberedCompareElement(state) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'lbg-compare-box';
+
+    const currentIds = getCurrentSelectedEntryIds(state);
+    const rememberedIds = new Set([
+        ...toStringArray(state.rememberedChoice?.selectedActiveIds),
+        ...toStringArray(state.rememberedChoice?.manualEntryIds),
+    ]);
+
+    const added = [...currentIds].filter((id) => !rememberedIds.has(id));
+    const removed = [...rememberedIds].filter((id) => !currentIds.has(id));
+
+    wrapper.appendChild(createCompareSection('Added', added, state));
+    wrapper.appendChild(createCompareSection('Removed', removed, state));
+
+    if (!added.length && !removed.length) {
+        const same = document.createElement('div');
+        same.className = 'lbg-compare-same';
+        same.textContent = 'Current selection is identical to remembered choice.';
+        wrapper.appendChild(same);
+    }
+
+    return wrapper;
+}
+
+function getCurrentSelectedEntryIds(state) {
+    return new Set([
+        ...state.activeEntries.filter((entry) => entry.selected).map((entry) => entry.id),
+        ...state.inactiveEntries.filter((entry) => entry.selected).map((entry) => entry.id),
+    ]);
+}
+
+function createCompareSection(title, ids, state) {
+    const section = document.createElement('div');
+    section.className = 'lbg-compare-section';
+
+    const heading = document.createElement('strong');
+    heading.textContent = `${title}:`;
+    section.appendChild(heading);
+
+    if (!ids.length) {
+        const empty = document.createElement('div');
+        empty.className = 'lbg-compare-empty';
+        empty.textContent = 'None';
+        section.appendChild(empty);
+        return section;
+    }
+
+    const list = document.createElement('ul');
+    list.className = 'lbg-compare-list';
+
+    for (const id of ids) {
+        const item = document.createElement('li');
+        item.textContent = formatEntryNameForCompare(findEntryById(state, id), id);
+        list.appendChild(item);
+    }
+
+    section.appendChild(list);
+    return section;
+}
+
+function findEntryById(state, id) {
+    return [...state.activeEntries, ...state.inactiveEntries].find((entry) => entry.id === id) || null;
+}
+
+function formatEntryNameForCompare(entry, id) {
+    if (!entry) return `Unknown entry (${id})`;
+    const bookName = entry.bookName ? ` — ${entry.bookName}` : '';
+    return `${entry.title || id}${bookName}`;
+}
+
+function getActivationReasonText(entry) {
+    if (entry.selectionSource === 'remembered') return 'Remembered choice';
+    if (entry.selectionSource === 'previous') return 'Previous request choice';
+    if (entry.selectionSource === 'manual' || (!entry.originallyActive && entry.selected)) return 'Manually added';
+
+    const matchedKeywords = toStringArray(entry.matchedKeywords);
+    if (entry.originallyActive && matchedKeywords.length) {
+        return `Triggered by keyword: "${matchedKeywords[0]}"`;
+    }
+
+    if (entry.originallyActive) {
+        switch (entry.sourceType) {
+            case 'character': return 'Triggered by character link';
+            case 'global': return 'Triggered by global lorebook';
+            case 'chat': return 'Triggered by chat-linked lorebook';
+            case 'persona': return 'Triggered by persona link';
+            default: return 'Triggered by prompt match';
+        }
+    }
+
+    return 'Not triggered';
+}
+
+function getKeywordMatchedText(entry) {
+    const matchedKeywords = toStringArray(entry.matchedKeywords);
+    if (!matchedKeywords.length) return '';
+
+    if (matchedKeywords.length === 1) return `Keyword matched: ${matchedKeywords[0]}`;
+    return `Keywords matched: ${matchedKeywords.join(', ')}`;
+}
+
+function appendHighlightedPreview(container, text, keywords) {
+    const value = String(text || '');
+    const highlights = toStringArray(keywords)
+        .map((keyword) => String(keyword || '').trim())
+        .filter((keyword) => keyword.length >= 2)
+        .sort((a, b) => b.length - a.length);
+
+    if (!highlights.length) {
+        container.textContent = value;
+        return;
+    }
+
+    const pattern = new RegExp(`(${highlights.map(escapeRegExp).join('|')})`, 'gi');
+    let lastIndex = 0;
+    let match;
+
+    while ((match = pattern.exec(value)) !== null) {
+        if (match.index > lastIndex) {
+            container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)));
+        }
+
+        const mark = document.createElement('mark');
+        mark.className = 'lbg-keyword-highlight';
+        mark.textContent = match[0];
+        container.appendChild(mark);
+        lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < value.length) {
+        container.appendChild(document.createTextNode(value.slice(lastIndex)));
+    }
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function renderLists(template, state) {
@@ -633,13 +842,16 @@ function renderEntrySet(container, entries, state, template) {
         container.append(createEntryElement(entry, state, template, () => {
             if (isBlocked(state.settings, entry)) {
                 entry.selected = false;
+                delete entry.selectionSource;
             } else if (isLocked(state.settings, entry)) {
                 entry.selected = true;
             } else {
                 entry.selected = !entry.selected;
+                updateSelectionSourceAfterUserToggle(entry);
             }
 
             enforceEntryRules(state);
+            updateChoiceInfo(template, state);
             renderLists(template, state);
             updateStats(template, state);
         }));
@@ -651,10 +863,12 @@ function createEntryElement(entry, state, template, onToggle) {
     const blocked = isBlocked(state.settings, entry);
     const favorite = isFavorite(state.settings, entry);
     const edited = hasTemporaryEdit(entry);
+    const compactView = Boolean(state.settings.compactView);
 
     const element = document.createElement('div');
     element.className = [
         'lbg-entry',
+        compactView ? 'lbg-entry-compact-view' : 'lbg-entry-detailed-view',
         entry.selected ? 'lbg-entry-selected' : 'lbg-entry-disabled',
         favorite ? 'lbg-entry-favorite' : '',
         locked ? 'lbg-entry-locked' : '',
@@ -689,36 +903,6 @@ function createEntryElement(entry, state, template, onToggle) {
     const entryActions = document.createElement('div');
     entryActions.className = 'lbg-entry-actions';
 
-    const lockButton = document.createElement('button');
-    lockButton.type = 'button';
-    lockButton.className = `lbg-icon-button lbg-lock-button ${locked ? 'is-locked' : ''}`;
-    lockButton.textContent = locked ? '🔒' : '🔓';
-    lockButton.title = locked ? 'Unlock entry' : 'Lock entry: always include in prompt';
-    lockButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleLocked(state.settings, entry);
-        enforceEntryRules(state);
-        persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
-    });
-
-    const blockButton = document.createElement('button');
-    blockButton.type = 'button';
-    blockButton.className = `lbg-icon-button lbg-block-button ${blocked ? 'is-blocked' : ''}`;
-    blockButton.textContent = '⊘';
-    blockButton.title = blocked ? 'Allow this entry again' : 'Never include this entry';
-    blockButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleBlocked(state.settings, entry);
-        enforceEntryRules(state);
-        persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
-    });
-
     const favoriteButton = document.createElement('button');
     favoriteButton.type = 'button';
     favoriteButton.className = `lbg-icon-button lbg-favorite-button ${favorite ? 'is-favorite' : ''}`;
@@ -733,21 +917,57 @@ function createEntryElement(entry, state, template, onToggle) {
         updateStats(template, state);
     });
 
-    const menuButton = document.createElement('button');
-    menuButton.type = 'button';
-    menuButton.className = 'lbg-icon-button lbg-menu-button';
-    menuButton.textContent = '⋯';
-    menuButton.title = 'Entry actions';
-    menuButton.setAttribute('aria-haspopup', 'true');
-    menuButton.setAttribute('aria-expanded', 'false');
+    if (compactView) {
+        entryActions.appendChild(favoriteButton);
+    } else {
+        const lockButton = document.createElement('button');
+        lockButton.type = 'button';
+        lockButton.className = `lbg-icon-button lbg-lock-button ${locked ? 'is-locked' : ''}`;
+        lockButton.textContent = locked ? '🔒' : '🔓';
+        lockButton.title = locked ? 'Unlock entry' : 'Lock entry: always include in prompt';
+        lockButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleLocked(state.settings, entry);
+            enforceEntryRules(state);
+            updateChoiceInfo(template, state);
+            persistState(state);
+            renderLists(template, state);
+            updateStats(template, state);
+        });
 
-    const menu = createEntryMenu(entry, state, template);
+        const blockButton = document.createElement('button');
+        blockButton.type = 'button';
+        blockButton.className = `lbg-icon-button lbg-block-button ${blocked ? 'is-blocked' : ''}`;
+        blockButton.textContent = '⊘';
+        blockButton.title = blocked ? 'Allow this entry again' : 'Never include this entry';
+        blockButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleBlocked(state.settings, entry);
+            enforceEntryRules(state);
+            updateChoiceInfo(template, state);
+            persistState(state);
+            renderLists(template, state);
+            updateStats(template, state);
+        });
 
-    entryActions.appendChild(lockButton);
-    entryActions.appendChild(blockButton);
-    entryActions.appendChild(favoriteButton);
-    entryActions.appendChild(menuButton);
-    entryActions.appendChild(menu);
+        const menuButton = document.createElement('button');
+        menuButton.type = 'button';
+        menuButton.className = 'lbg-icon-button lbg-menu-button';
+        menuButton.textContent = '⋯';
+        menuButton.title = 'Entry actions';
+        menuButton.setAttribute('aria-haspopup', 'true');
+        menuButton.setAttribute('aria-expanded', 'false');
+
+        const menu = createEntryMenu(entry, state, template);
+
+        entryActions.appendChild(lockButton);
+        entryActions.appendChild(blockButton);
+        entryActions.appendChild(favoriteButton);
+        entryActions.appendChild(menuButton);
+        entryActions.appendChild(menu);
+    }
 
     top.appendChild(label);
     top.appendChild(entryActions);
@@ -763,24 +983,46 @@ function createEntryElement(entry, state, template, onToggle) {
     bookBadge.className = 'lbg-book-badge';
     bookBadge.textContent = entry.bookName;
 
-    const sourceBadge = document.createElement('span');
-    sourceBadge.className = 'lbg-source-badge';
-    sourceBadge.textContent = getSourceLabel(entry.sourceType) || 'external';
-
-    const matchBadge = document.createElement('span');
-    matchBadge.className = 'lbg-match-badge';
-    matchBadge.textContent = entry.originallyActive ? `match: ${entry.matchType}` : 'manual candidate';
-
     meta.appendChild(tokenBadge);
     meta.appendChild(bookBadge);
-    meta.appendChild(sourceBadge);
-    meta.appendChild(matchBadge);
 
-    if (locked) meta.appendChild(createStatusBadge('Locked', 'lbg-lock-badge'));
-    if (blocked) meta.appendChild(createStatusBadge('Never include', 'lbg-block-badge'));
-    if (edited) meta.appendChild(createStatusBadge('Edited for this prompt', 'lbg-edit-badge'));
+    if (!compactView) {
+        const sourceBadge = document.createElement('span');
+        sourceBadge.className = 'lbg-source-badge';
+        sourceBadge.textContent = getSourceLabel(entry.sourceType) || 'external';
+
+        const matchBadge = document.createElement('span');
+        matchBadge.className = 'lbg-match-badge';
+        matchBadge.textContent = entry.originallyActive ? `match: ${entry.matchType}` : 'manual candidate';
+
+        meta.appendChild(sourceBadge);
+        meta.appendChild(matchBadge);
+
+        if (locked) meta.appendChild(createStatusBadge('Locked', 'lbg-lock-badge'));
+        if (blocked) meta.appendChild(createStatusBadge('Never include', 'lbg-block-badge'));
+        if (edited) meta.appendChild(createStatusBadge('Edited for this prompt', 'lbg-edit-badge'));
+    }
 
     const tags = createEntryTagRow(entry, state.settings);
+
+    element.appendChild(top);
+    element.appendChild(meta);
+    if (tags.childElementCount) element.appendChild(tags);
+
+    if (compactView) return element;
+
+    const reason = document.createElement('div');
+    reason.className = 'lbg-activation-reason';
+    reason.textContent = getActivationReasonText(entry);
+    element.appendChild(reason);
+
+    const keywordText = getKeywordMatchedText(entry);
+    if (keywordText) {
+        const keyword = document.createElement('div');
+        keyword.className = 'lbg-keyword-match';
+        keyword.textContent = keywordText;
+        element.appendChild(keyword);
+    }
 
     const keys = document.createElement('div');
     keys.className = 'lbg-keys';
@@ -788,24 +1030,18 @@ function createEntryElement(entry, state, template, onToggle) {
 
     const preview = document.createElement('pre');
     preview.className = 'lbg-preview';
-    preview.textContent = shorten(getEntryPromptContent(entry), 500);
+    appendHighlightedPreview(preview, shorten(getEntryPromptContent(entry), 500), entry.matchedKeywords);
 
     if (edited) {
         const editHint = document.createElement('div');
         editHint.className = 'lbg-edit-hint';
         editHint.textContent = 'Temporary prompt version is shown below. Original lorebook entry is not changed.';
-        element.appendChild(top);
-        element.appendChild(meta);
-        if (tags.childElementCount) element.appendChild(tags);
         element.appendChild(keys);
         element.appendChild(editHint);
         element.appendChild(preview);
         return element;
     }
 
-    element.appendChild(top);
-    element.appendChild(meta);
-    if (tags.childElementCount) element.appendChild(tags);
     element.appendChild(keys);
     element.appendChild(preview);
 
@@ -847,6 +1083,7 @@ function createEntryMenu(entry, state, template) {
     lockAction.addEventListener('click', () => {
         toggleLocked(state.settings, entry);
         enforceEntryRules(state);
+        updateChoiceInfo(template, state);
         persistState(state);
         renderLists(template, state);
         updateStats(template, state);
@@ -861,6 +1098,7 @@ function createEntryMenu(entry, state, template) {
     blockAction.addEventListener('click', () => {
         toggleBlocked(state.settings, entry);
         enforceEntryRules(state);
+        updateChoiceInfo(template, state);
         persistState(state);
         renderLists(template, state);
         updateStats(template, state);
@@ -1068,9 +1306,11 @@ function showTemporaryEditDialog(entry) {
         dialog.appendChild(footer);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        document.body.classList.add('lbg-edit-open');
 
         const cleanup = (result) => {
             document.removeEventListener('keydown', onKeyDown);
+            document.body.classList.remove('lbg-edit-open');
             overlay.remove();
             resolve(result);
         };

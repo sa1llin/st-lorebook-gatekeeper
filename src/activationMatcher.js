@@ -12,6 +12,7 @@ export function findActiveEntries(entries, promptText) {
                 originallyActive: true,
                 selected: true,
                 matchType,
+                matchedKeywords: findMatchedKeywords(entry, promptText),
             };
         })
         .filter(Boolean);
@@ -30,8 +31,45 @@ export function splitActiveAndInactive(entries, activeEntries) {
                 originallyActive: false,
                 selected: false,
                 matchType: 'none',
+                matchedKeywords: [],
             })),
     };
+}
+
+
+function findMatchedKeywords(entry, promptText) {
+    const keys = [...(entry?.keys || []), ...(entry?.secondaryKeys || [])]
+        .flatMap(splitPossibleKeywordList)
+        .map((key) => String(key || '').trim())
+        .filter(Boolean);
+
+    if (!keys.length) return [];
+
+    const haystack = stripEntryContentFromPrompt(promptText, entry?.content).toLowerCase();
+    const matched = [];
+
+    for (const key of keys) {
+        const normalizedKey = key.toLowerCase();
+        if (!normalizedKey || matched.some((value) => value.toLowerCase() === normalizedKey)) continue;
+        if (haystack.includes(normalizedKey)) matched.push(key);
+    }
+
+    return matched;
+}
+
+function stripEntryContentFromPrompt(promptText, content) {
+    const prompt = String(promptText || '');
+    const entryContent = String(content || '');
+    if (!entryContent) return prompt;
+
+    return prompt.split(entryContent).join(' ');
+}
+
+function splitPossibleKeywordList(value) {
+    return String(value || '')
+        .split(/[,;|]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
 }
 
 function getEntryMatchType(entry, promptText, normalizedPrompt) {
