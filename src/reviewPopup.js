@@ -1,5 +1,6 @@
 import { renderExtensionTemplateAsync } from '../../../../extensions.js';
 import { POPUP_TYPE, Popup } from '../../../../popup.js';
+import { saveSettings } from './settings.js';
 import {
     ALL_LOREBOOKS_FILTER,
     CANCEL_GENERATION_RESULT,
@@ -18,12 +19,26 @@ import {
     savePreviousChoiceFromState,
     saveRememberedChoiceFromState,
 } from './choiceMemory.js';
+import {
+    addEntryTag,
+    ensureEntryMetaSettings,
+    formatTagLabel,
+    getAllAvailableTags,
+    getEntryTags,
+    getTagColor,
+    isFavorite,
+    normalizeTagName,
+    removeEntryTag,
+    toggleFavorite,
+} from './entryMetaStore.js';
 
 export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings }) {
+    ensureEntryMetaSettings(settings);
+
     const template = $(await renderExtensionTemplateAsync(EXTENSION_PATH, 'popup'));
     const state = {
-        activeEntries: activeEntries.map((entry) => ({ ...entry, selected: true, originallyActive: true })),
-        inactiveEntries: inactiveEntries.map((entry) => ({ ...entry, selected: false, originallyActive: false })),
+        activeEntries: activeEntries.map((entry) => ({ ...entry, stableId: entry.stableId || entry.id, selected: true, originallyActive: true })),
+        inactiveEntries: inactiveEntries.map((entry) => ({ ...entry, stableId: entry.stableId || entry.id, selected: false, originallyActive: false })),
         settings,
         statsBefore,
         rememberedChoice: loadRememberedChoice(),
@@ -32,6 +47,7 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
     };
 
     initializeControls(template, state);
+    renderTagFilterList(template, state);
     renderLists(template, state);
     updateStats(template, state);
 
@@ -46,7 +62,6 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
     if (!popupResult) return { action: 'discard', disabledEntries: [], manualEntries: [] };
 
     state.previousChoice = savePreviousChoiceFromState(state);
-
     if (Boolean(template.find('#lbgRememberChoice').prop('checked'))) {
         state.rememberedChoice = saveRememberedChoiceFromState(state);
     }
@@ -135,6 +150,7 @@ function showMobileReviewOverlay(template, cancelGenerationButton) {
 function initializeControls(template, state) {
     template.find('#lbgSort').val(state.settings.sortMode || 'tokens_desc');
     template.find('#lbgShowInactive').prop('checked', Boolean(state.settings.showInactiveEntries));
+    template.find('#lbgTagFilterMode').val(state.settings.tagFilter?.mode || 'or');
 
     populateInactiveBookFilter(template, state);
     populatePreferredInactiveBooks(template, state);
@@ -146,12 +162,29 @@ function initializeControls(template, state) {
 
     template.find('#lbgSort').on('change', () => {
         state.settings.sortMode = template.find('#lbgSort').val();
+        persistState(state);
         renderLists(template, state);
         updateStats(template, state);
     });
 
     template.find('#lbgShowInactive').on('change', () => {
         state.settings.showInactiveEntries = Boolean(template.find('#lbgShowInactive').prop('checked'));
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    template.find('#lbgTagFilterMode').on('change', () => {
+        state.settings.tagFilter.mode = template.find('#lbgTagFilterMode').val() === 'and' ? 'and' : 'or';
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    template.find('#lbgClearTagFilter').on('click', () => {
+        state.settings.tagFilter.selectedTags = [];
+        persistState(state);
+        renderTagFilterList(template, state);
         renderLists(template, state);
         updateStats(template, state);
     });
@@ -164,6 +197,7 @@ function initializeControls(template, state) {
 
     template.find('#lbgUseLinkedBooksFirst').on('click', () => {
         state.settings.preferredInactiveBookNames = getLinkedBookNames(state.inactiveEntries);
+        persistState(state);
         populatePreferredInactiveBooks(template, state);
         renderLists(template, state);
         updateStats(template, state);
@@ -171,6 +205,7 @@ function initializeControls(template, state) {
 
     template.find('#lbgClearPreferredBooks').on('click', () => {
         state.settings.preferredInactiveBookNames = [];
+        persistState(state);
         populatePreferredInactiveBooks(template, state);
         renderLists(template, state);
         updateStats(template, state);
@@ -216,13 +251,17 @@ function initializeControls(template, state) {
     updateChoiceInfo(template, state);
 
     template.find('#lbgDisableAllActive').on('click', () => {
-        state.activeEntries.forEach((entry) => { entry.selected = false; });
+        state.activeEntries.forEach((entry) => {
+            entry.selected = false;
+        });
         renderLists(template, state);
         updateStats(template, state);
     });
 
     template.find('#lbgEnableAllActive').on('click', () => {
-        state.activeEntries.forEach((entry) => { entry.selected = true; });
+        state.activeEntries.forEach((entry) => {
+            entry.selected = true;
+        });
         renderLists(template, state);
         updateStats(template, state);
     });
@@ -269,6 +308,7 @@ function populatePreferredInactiveBooks(template, state) {
             else next.delete(info.bookName);
 
             state.settings.preferredInactiveBookNames = [...next].filter((bookName) => availableBookNames.has(bookName));
+            persistState(state);
             renderLists(template, state);
             updateStats(template, state);
         });
@@ -279,6 +319,42 @@ function populatePreferredInactiveBooks(template, state) {
         label.appendChild(checkbox);
         label.appendChild(text);
         container.append(label);
+    }
+}
+
+function renderTagFilterList(template, state) {
+    const container = template.find('#lbgTagFilterList');
+    const availableTags = getAllAvailableTags(state.settings);
+    const selectedTags = new Set(state.settings.tagFilter?.selectedTags || []);
+
+    container.empty();
+
+    if (!availableTags.length) {
+        container.append(createNoticeElement('No tags available.'));
+        return;
+    }
+
+    for (const tag of availableTags) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `lbg-filter-tag ${selectedTags.has(tag.name) ? 'is-selected' : ''}`;
+        button.style.setProperty('--tag-color', tag.color);
+        button.textContent = tag.label;
+        button.title = tag.type === 'standard' ? 'Standard tag' : 'Custom tag';
+
+        button.addEventListener('click', () => {
+            const next = new Set(state.settings.tagFilter.selectedTags || []);
+            if (next.has(tag.name)) next.delete(tag.name);
+            else next.add(tag.name);
+
+            state.settings.tagFilter.selectedTags = [...next];
+            persistState(state);
+            renderTagFilterList(template, state);
+            renderLists(template, state);
+            updateStats(template, state);
+        });
+
+        container.append(button);
     }
 }
 
@@ -343,17 +419,17 @@ function renderLists(template, state) {
     activeContainer.empty();
     inactiveContainer.empty();
 
-    const activeEntries = filterAndSortEntries(state.activeEntries, query, sortMode);
-    const inactiveCandidates = filterEntries(state.inactiveEntries, query);
+    const activeEntries = filterAndSortEntries(state.activeEntries, query, sortMode, state);
+    const inactiveCandidates = filterEntries(state.inactiveEntries, query, state);
     const inactiveEntries = sortInactiveEntries(
-        filterInactiveEntriesByBook(inactiveCandidates, state.inactiveBookFilter),
+        filterInactiveEntriesByBook(filterEntriesByTags(inactiveCandidates, state), state.inactiveBookFilter),
         sortMode,
         state,
     );
 
     renderEntrySet(activeContainer, activeEntries, state, template);
-    inactiveSection.toggle(showInactive);
 
+    inactiveSection.toggle(showInactive);
     if (showInactive) {
         const visibleInactive = inactiveEntries.slice(0, MAX_RENDERED_ENTRIES);
         renderEntrySet(inactiveContainer, visibleInactive, state, template);
@@ -374,7 +450,7 @@ function renderEntrySet(container, entries, state, template) {
     }
 
     for (const entry of entries) {
-        container.append(createEntryElement(entry, () => {
+        container.append(createEntryElement(entry, state, template, () => {
             entry.selected = !entry.selected;
             renderLists(template, state);
             updateStats(template, state);
@@ -382,9 +458,9 @@ function renderEntrySet(container, entries, state, template) {
     }
 }
 
-function createEntryElement(entry, onToggle) {
+function createEntryElement(entry, state, template, onToggle) {
     const element = document.createElement('div');
-    element.className = `lbg-entry ${entry.selected ? 'lbg-entry-selected' : 'lbg-entry-disabled'}`;
+    element.className = `lbg-entry ${entry.selected ? 'lbg-entry-selected' : 'lbg-entry-disabled'} ${isFavorite(state.settings, entry) ? 'lbg-entry-favorite' : ''}`;
 
     const top = document.createElement('div');
     top.className = 'lbg-entry-top';
@@ -404,12 +480,32 @@ function createEntryElement(entry, onToggle) {
     label.appendChild(checkbox);
     label.appendChild(title);
 
+    const entryActions = document.createElement('div');
+    entryActions.className = 'lbg-entry-actions';
+
     const tokenBadge = document.createElement('span');
     tokenBadge.className = 'lbg-token-badge';
     tokenBadge.textContent = `${entry.tokens || 0} tokens`;
 
+    const favoriteButton = document.createElement('button');
+    favoriteButton.type = 'button';
+    favoriteButton.className = `lbg-favorite-button ${isFavorite(state.settings, entry) ? 'is-favorite' : ''}`;
+    favoriteButton.textContent = isFavorite(state.settings, entry) ? '★' : '☆';
+    favoriteButton.title = isFavorite(state.settings, entry) ? 'Remove from favorites' : 'Add to favorites';
+    favoriteButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleFavorite(state.settings, entry);
+        persistState(state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    entryActions.appendChild(tokenBadge);
+    entryActions.appendChild(favoriteButton);
+
     top.appendChild(label);
-    top.appendChild(tokenBadge);
+    top.appendChild(entryActions);
 
     const meta = document.createElement('div');
     meta.className = 'lbg-entry-meta';
@@ -435,14 +531,123 @@ function createEntryElement(entry, onToggle) {
     meta.appendChild(matchBadge);
     meta.appendChild(keys);
 
+    const tags = createTagsElement(entry, state, template);
+
     const preview = document.createElement('pre');
     preview.className = 'lbg-preview';
     preview.textContent = shorten(entry.content, 500);
 
     element.appendChild(top);
     element.appendChild(meta);
+    element.appendChild(tags);
     element.appendChild(preview);
+
     return element;
+}
+
+function createTagsElement(entry, state, template) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'lbg-entry-tags';
+
+    const tags = getEntryTags(state.settings, entry);
+    for (const tagName of tags) {
+        wrapper.appendChild(createTagChip(tagName, entry, state, template));
+    }
+
+    const addArea = document.createElement('div');
+    addArea.className = 'lbg-add-tag-area';
+
+    const select = document.createElement('select');
+    select.className = 'text_pole lbg-tag-select';
+    select.appendChild(createOption('', '+ standard tag'));
+
+    for (const tag of getAllAvailableTags(state.settings)) {
+        const option = createOption(tag.name, tag.label);
+        option.disabled = tags.includes(tag.name);
+        select.appendChild(option);
+    }
+
+    select.addEventListener('change', () => {
+        const tagName = normalizeTagName(select.value);
+        if (!tagName) return;
+
+        addEntryTag(state.settings, entry, tagName);
+        persistState(state);
+        renderTagFilterList(template, state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    const input = document.createElement('input');
+    input.className = 'text_pole lbg-custom-tag-input';
+    input.type = 'text';
+    input.placeholder = 'Custom tag...';
+    input.maxLength = 40;
+
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'menu_button lbg-add-tag-button';
+    addButton.textContent = 'Add';
+
+    const addCustomTag = () => {
+        const tagName = normalizeTagName(input.value);
+        if (!tagName) return;
+
+        addEntryTag(state.settings, entry, tagName);
+        input.value = '';
+        persistState(state);
+        renderTagFilterList(template, state);
+        renderLists(template, state);
+        updateStats(template, state);
+    };
+
+    addButton.addEventListener('click', addCustomTag);
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addCustomTag();
+        }
+    });
+
+    addArea.appendChild(select);
+    addArea.appendChild(input);
+    addArea.appendChild(addButton);
+    wrapper.appendChild(addArea);
+
+    return wrapper;
+}
+
+function createTagChip(tagName, entry, state, template) {
+    const color = getTagColor(state.settings, tagName);
+    const chip = document.createElement('span');
+    chip.className = 'lbg-tag';
+    chip.style.setProperty('--tag-color', color);
+
+    const dot = document.createElement('span');
+    dot.className = 'lbg-tag-dot';
+
+    const label = document.createElement('span');
+    label.className = 'lbg-tag-label';
+    label.textContent = formatTagLabel(tagName);
+
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'lbg-tag-remove';
+    removeButton.textContent = '×';
+    removeButton.title = 'Remove tag';
+    removeButton.addEventListener('click', () => {
+        removeEntryTag(state.settings, entry, tagName);
+        persistState(state);
+        renderTagFilterList(template, state);
+        renderLists(template, state);
+        updateStats(template, state);
+    });
+
+    chip.appendChild(dot);
+    chip.appendChild(label);
+    chip.appendChild(removeButton);
+
+    return chip;
 }
 
 function createNoticeElement(text) {
@@ -468,29 +673,49 @@ function updateStats(template, state) {
     template.find('#lbgBeforeTokens').text(state.statsBefore?.activeTokens || 0);
 }
 
-function filterAndSortEntries(entries, query, sortMode) {
-    return sortEntries(filterEntries(entries, query), sortMode);
+function filterAndSortEntries(entries, query, sortMode, state) {
+    return sortEntries(filterEntriesByTags(filterEntries(entries, query, state), state), sortMode, state);
 }
 
-function filterEntries(entries, query) {
+function filterEntries(entries, query, state) {
     if (!query) return [...entries];
 
     return entries.filter((entry) => {
-        const haystack = [entry.title, entry.bookName, entry.content, ...(entry.keys || []), ...(entry.secondaryKeys || [])]
+        const tagText = getEntryTags(state.settings, entry).join(' ');
+        const haystack = [entry.title, entry.bookName, entry.content, tagText, ...(entry.keys || []), ...(entry.secondaryKeys || [])]
             .join(' ')
             .toLowerCase();
+
         return haystack.includes(query);
+    });
+}
+
+function filterEntriesByTags(entries, state) {
+    const selectedTags = toStringArray(state.settings.tagFilter?.selectedTags).map(normalizeTagName).filter(Boolean);
+    if (!selectedTags.length) return entries;
+
+    const mode = state.settings.tagFilter?.mode === 'and' ? 'and' : 'or';
+
+    return entries.filter((entry) => {
+        const entryTags = getEntryTags(state.settings, entry);
+        if (mode === 'and') return selectedTags.every((tag) => entryTags.includes(tag));
+        return selectedTags.some((tag) => entryTags.includes(tag));
     });
 }
 
 function sortInactiveEntries(entries, sortMode, state) {
     const preferred = new Set(toStringArray(state.settings.preferredInactiveBookNames));
-    const sorted = sortEntries(entries, sortMode);
+    const sorted = sortEntries(entries, sortMode, state);
 
     return sorted.sort((a, b) => {
+        const favoriteA = isFavorite(state.settings, a) ? 0 : 1;
+        const favoriteB = isFavorite(state.settings, b) ? 0 : 1;
+        if (favoriteA !== favoriteB) return favoriteA - favoriteB;
+
         const priorityA = getInactivePriority(a, preferred);
         const priorityB = getInactivePriority(b, preferred);
         if (priorityA !== priorityB) return priorityA - priorityB;
+
         return 0;
     });
 }
@@ -500,7 +725,7 @@ function getInactivePriority(entry, preferred) {
     return 1 + getSourcePriority(entry.sourceType);
 }
 
-function sortEntries(entries, sortMode) {
+function sortEntries(entries, sortMode, state) {
     const result = [...entries];
 
     switch (sortMode) {
@@ -520,7 +745,11 @@ function sortEntries(entries, sortMode) {
             break;
     }
 
-    return result;
+    return result.sort((a, b) => {
+        const favoriteA = isFavorite(state.settings, a) ? 0 : 1;
+        const favoriteB = isFavorite(state.settings, b) ? 0 : 1;
+        return favoriteA - favoriteB;
+    });
 }
 
 function buildKeysText(entry) {
@@ -551,6 +780,11 @@ function getSourceLabel(sourceType) {
         case 'global': return 'global';
         default: return 'external';
     }
+}
+
+function persistState(state) {
+    ensureEntryMetaSettings(state.settings);
+    saveSettings(state.settings);
 }
 
 function toStringArray(value) {

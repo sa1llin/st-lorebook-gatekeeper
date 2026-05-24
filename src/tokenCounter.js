@@ -24,7 +24,6 @@ export async function addTokenCounts(entries) {
 
 export async function countTextTokens(text, debugLabel = 'text') {
     const tokenCounter = getTokenCounter();
-
     try {
         return typeof tokenCounter === 'function' ? await tokenCounter(String(text || '')) : estimateTokens(text);
     } catch (error) {

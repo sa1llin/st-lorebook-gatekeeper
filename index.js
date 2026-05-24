@@ -107,12 +107,14 @@ eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             removeEntriesFromChat(data.chat, disabledEntries);
             injectManualEntriesIntoChat(data.chat, manualEntries);
+
             await queueItemizedPromptCorrection({
                 finalPrompt: data.chat,
                 selectedActiveEntries,
                 disabledEntries,
                 manualEntries,
             });
+
             console.debug(`${MODULE_NAME}: chat completion prompt updated.`);
         });
     } catch (error) {
@@ -135,12 +137,14 @@ eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             data.prompt = removeEntriesFromTextPrompt(data.prompt, disabledEntries);
             data.prompt = injectManualEntriesIntoTextPrompt(data.prompt, manualEntries);
+
             await queueItemizedPromptCorrection({
                 finalPrompt: data.prompt,
                 selectedActiveEntries,
                 disabledEntries,
                 manualEntries,
             });
+
             console.debug(`${MODULE_NAME}: text completion prompt updated.`);
         });
     } catch (error) {

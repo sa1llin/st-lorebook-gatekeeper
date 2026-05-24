@@ -56,7 +56,8 @@
 
 .lbg-action-buttons,
 .lbg-memory-actions,
-.lbg-priority-actions {
+.lbg-priority-actions,
+.lbg-filter-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
@@ -90,6 +91,11 @@
     background: var(--SmartThemeBlurTintColor);
 }
 
+.lbg-entry-favorite {
+    border-color: rgba(243, 201, 105, 0.85) !important;
+    box-shadow: 0 0 0 1px rgba(243, 201, 105, 0.12) inset;
+}
+
 .lbg-entry-selected {
     opacity: 1;
 }
@@ -115,6 +121,38 @@
 
 .lbg-entry-title {
     overflow-wrap: anywhere;
+}
+
+.lbg-entry-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.lbg-favorite-button {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid #343434;
+    background: #101010;
+    color: #888;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+}
+
+.lbg-favorite-button:hover {
+    color: #dcddd8;
+    background: #1f1f1f;
+}
+
+.lbg-favorite-button.is-favorite {
+    color: #f3c969 !important;
+    border-color: rgba(243, 201, 105, 0.65) !important;
 }
 
 .lbg-entry-meta {
@@ -164,7 +202,8 @@
 }
 
 .lbg-memory-panel,
-.lbg-priority-panel {
+.lbg-priority-panel,
+.lbg-tag-filter-panel {
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 8px;
     padding: 10px;
@@ -178,6 +217,121 @@
 .lbg-priority-hint {
     opacity: 0.82;
     font-size: 0.88em;
+}
+
+.lbg-filter-header,
+.lbg-priority-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.lbg-tag-filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+}
+
+.lbg-filter-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid color-mix(in srgb, var(--tag-color) 55%, #333);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--tag-color) 12%, #171717);
+    color: #ddd;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.lbg-filter-tag::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--tag-color);
+}
+
+.lbg-filter-tag.is-selected {
+    background: color-mix(in srgb, var(--tag-color) 35%, #171717);
+    color: #fff;
+}
+
+.lbg-entry-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.lbg-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--tag-color) 18%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tag-color) 65%, transparent);
+    color: #f2f2f2;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.lbg-tag-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--tag-color);
+    flex-shrink: 0;
+}
+
+.lbg-tag-label {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lbg-tag-remove {
+    border: none !important;
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.65) !important;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 2px;
+    font-size: 13px;
+    line-height: 1;
+}
+
+.lbg-tag-remove:hover {
+    color: #ffffff !important;
+}
+
+.lbg-add-tag-area {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.lbg-tag-select {
+    width: 150px;
+    min-width: 120px;
+}
+
+.lbg-custom-tag-input {
+    width: 135px;
+    min-width: 120px;
+}
+
+.lbg-add-tag-button {
+    border-radius: 999px !important;
+    padding: 3px 10px !important;
+    font-size: 12px !important;
 }
 
 .lbg-book-filter-row {
@@ -195,13 +349,6 @@
 #lbgInactiveBookFilter {
     min-width: 220px;
     max-width: 100%;
-}
-
-.lbg-priority-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: flex-start;
 }
 
 .lbg-book-choice-list {
@@ -300,6 +447,7 @@ body.lbg-mobile-open {
 .lbg-notice,
 .lbg-memory-panel,
 .lbg-priority-panel,
+.lbg-tag-filter-panel,
 .lbg-book-choice,
 .lbg-root input,
 .lbg-root select,
@@ -316,6 +464,7 @@ body.lbg-mobile-open {
 .lbg-notice,
 .lbg-memory-panel,
 .lbg-priority-panel,
+.lbg-tag-filter-panel,
 .lbg-book-choice,
 .lbg-book-badge,
 .lbg-source-badge,
@@ -401,7 +550,9 @@ body.lbg-mobile-open {
     .lbg-section-header,
     .lbg-entry-top,
     .lbg-book-filter-row,
-    .lbg-priority-header {
+    .lbg-priority-header,
+    .lbg-filter-header,
+    .lbg-add-tag-area {
         flex-direction: column;
         align-items: stretch;
     }
@@ -425,11 +576,14 @@ body.lbg-mobile-open {
         font-size: 0.82em;
     }
 
+    .lbg-entry-actions,
     .lbg-token-badge {
         align-self: flex-start;
     }
 
-    #lbgInactiveBookFilter {
+    #lbgInactiveBookFilter,
+    .lbg-tag-select,
+    .lbg-custom-tag-input {
         width: 100%;
         min-width: 0;
     }

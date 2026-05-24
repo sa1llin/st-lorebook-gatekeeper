@@ -36,7 +36,6 @@ export function splitActiveAndInactive(entries, activeEntries) {
 
 function getEntryMatchType(entry, promptText, normalizedPrompt) {
     if (!entry?.content) return 'none';
-
     if (promptText.includes(entry.content)) return 'exact';
 
     const normalizedContent = normalizeForMatching(entry.content);

@@ -30,7 +30,6 @@ export async function queueItemizedPromptCorrection({
 
 export function scheduleItemizedPromptCorrectionFlush() {
     if (!pendingPatch) return;
-
     for (const delay of FLUSH_DELAYS_MS) {
         setTimeout(() => applyPendingPatch(), delay);
     }
@@ -61,8 +60,6 @@ function applyPendingPatch() {
         manualEntries: pendingPatch.manualEntries.length,
     };
 
-    // These OAI fields are not the main source for the WI line in Prompt Itemization,
-    // but keeping the total close to the patched final prompt prevents confusing stale totals.
     if (target.main_api === 'openai') {
         target.oaiTotalTokens = pendingPatch.finalPromptTokens;
     }
@@ -82,7 +79,6 @@ function buildWorldInfoString(selectedActiveEntries, manualEntries) {
         .join('\n\n');
 
     const manualText = formatManualEntries(manualEntries);
-
     return [activeText, manualText].filter(Boolean).join('\n\n').trim();
 }
 
@@ -99,7 +95,9 @@ function flattenPrompt(prompt) {
         return prompt
             .map((message) => {
                 if (typeof message?.content === 'string') return message.content;
-                if (Array.isArray(message?.content)) return message.content.map((part) => part?.text || part?.content || '').join('\n');
+                if (Array.isArray(message?.content)) {
+                    return message.content.map((part) => part?.text || part?.content || '').join('\n');
+                }
                 return '';
             })
             .filter(Boolean)

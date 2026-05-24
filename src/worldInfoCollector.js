@@ -186,8 +186,8 @@ function getLorebookSourceHints(context, worldInfoModule) {
         ...(Array.isArray(worldInfoModule?.world_info?.globalSelect) ? worldInfoModule.world_info.globalSelect : []),
         ...(Array.isArray(context?.worldInfo?.globalSelect) ? context.worldInfo.globalSelect : []),
     ];
-    for (const bookName of globalBooks) addSourceHint(hints, bookName, 'global');
 
+    for (const bookName of globalBooks) addSourceHint(hints, bookName, 'global');
     return hints;
 }
 
@@ -224,10 +224,12 @@ function normalizeWorldInfoEntry(bookName, entry, sourceType) {
     const content = String(entry.content || '').trim();
     if (!content) return null;
 
-    const uid = entry.uid ?? entry.id ?? cryptoRandomId();
+    const uid = entry.uid ?? entry.id ?? hashString(`${bookName}:${entry.comment || entry.name || ''}:${content}`);
+    const id = `${bookName}:${uid}`;
 
     return {
-        id: `${bookName}:${uid}`,
+        id,
+        stableId: id,
         bookName,
         uid,
         title: String(entry.comment || entry.name || `Entry ${uid}`),
@@ -280,7 +282,14 @@ function dedupeEntries(entries) {
     return result;
 }
 
-function cryptoRandomId() {
-    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-    return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+function hashString(value) {
+    let hash = 0;
+    const text = String(value || '');
+
+    for (let i = 0; i < text.length; i += 1) {
+        hash = ((hash << 5) - hash) + text.charCodeAt(i);
+        hash |= 0;
+    }
+
+    return Math.abs(hash).toString(36);
 }

@@ -31,7 +31,6 @@ export function removeEntriesFromChat(chat, disabledEntries) {
 export function injectManualEntriesIntoChat(chat, manualEntries) {
     const block = formatManualEntries(manualEntries);
     if (!block || !Array.isArray(chat)) return;
-
     chat.unshift({ role: 'system', content: block });
 }
 

@@ -16,13 +16,27 @@
     </div>
 
     <div class="lbg-toolbar">
-        <input id="lbgSearch" class="text_pole" type="search" placeholder="Search entries, lorebooks, keys, content..." />
+        <input id="lbgSearch" class="text_pole" type="search" placeholder="Search entries, lorebooks, keys, content, tags..." />
         <select id="lbgSort" class="text_pole">
             <option value="tokens_desc">Tokens: high to low</option>
             <option value="tokens_asc">Tokens: low to high</option>
             <option value="book">Book name</option>
             <option value="title">Entry title</option>
         </select>
+    </div>
+
+    <div class="lbg-tag-filter-panel">
+        <div class="lbg-filter-header">
+            <strong>Filter by tags</strong>
+            <div class="lbg-filter-actions">
+                <select id="lbgTagFilterMode" class="text_pole" title="Tag filter mode">
+                    <option value="or">OR: any selected tag</option>
+                    <option value="and">AND: all selected tags</option>
+                </select>
+                <button id="lbgClearTagFilter" type="button" class="menu_button">Clear tags</button>
+            </div>
+        </div>
+        <div id="lbgTagFilterList" class="lbg-tag-filter-list"></div>
     </div>
 
     <div class="lbg-actions">
@@ -57,6 +71,7 @@
         <h4>Activated entries</h4>
         <span><strong id="lbgActiveVisibleCount">0</strong> visible</span>
     </div>
+
     <div id="lbgActiveEntries" class="lbg-list"></div>
 
     <div id="lbgInactiveSection">
@@ -83,6 +98,7 @@
                     <button id="lbgClearPreferredBooks" type="button" class="menu_button">Clear priority</button>
                 </div>
             </div>
+
             <div id="lbgPreferredInactiveBooks" class="lbg-book-choice-list"></div>
         </div>
 

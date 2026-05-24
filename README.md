@@ -4,20 +4,14 @@
 
 ## Установка
 
-1. Удалите старую папку расширения:
+1. Скопируйте ссылку на репозиторий:
 
-```text
-SillyTavern/public/scripts/extensions/third-party/st-lorebook-gatekeeper
-```
+   https://github.com/sa1llin/st-lorebook-gatekeeper.git
 
-2. Распакуйте новую папку `st-lorebook-gatekeeper` сюда:
+2. Вставьте ссылку в соответствующее поле в SillyTavern "Установить расширение".
+3. ВАЖНО: выберите "Установить для всех пользователей".
+4. Перезапустите SillyTavern.
 
-```text
-SillyTavern/public/scripts/extensions/third-party/
-```
-
-3. Перезапустите SillyTavern.
-4. Очистите кэш браузера или выполните жесткое обновление.
 
 ## Возможности
 
@@ -31,44 +25,36 @@ SillyTavern/public/scripts/extensions/third-party/
 - Previous request choice для быстрого повторного применения выбора после reroll/swipe.
 - Приоритетный выбор inactive-лорбуков без отключения режима All lorebooks.
 - Коррекция Prompt Itemization после подтверждения изменений в расширении.
+- Избранные записи через звёздочку.
+- Закрепление избранных записей выше остальных в активном и неактивном списке.
+- Стандартные тэги для записей.
+- Кастомные пользовательские тэги.
+- Цветные тэги с постоянным цветом для каждого имени тэга.
+- Фильтрация записей по тэгам в режимах OR и AND.
 
-## v0.1.7
+## v0.1.8
 
-- Добавлена кнопка `Apply previous request choice`.
-  - Выбор из предыдущего подтверждённого запроса сохраняется отдельно от `Remembered choice`.
-  - Кнопка применяет предыдущий выбор к текущему popup без перезаписи remembered-настроек.
-- Расширен блок inactive-записей.
-  - Сохранён существующий фильтр `All lorebooks` / один лорбук.
-  - Добавлен список `Prioritize inactive lorebooks`, где пользователь выбирает сторонние лорбуки, записи которых нужно показывать первыми.
-  - Добавлена кнопка `Use linked/global first` для быстрого приоритета chat/persona/character/global лорбуков, если SillyTavern отдаёт эти связи.
-- Добавлена коррекция Prompt Itemization.
-  - После подтверждения popup расширение обновляет сохранённый itemized prompt: `rawPrompt`, `finalPrompt`, `worldInfoString` и вычисляемую строку World Info.
-  - Это снижает риск, что Prompt Itemization покажет старое количество токенов лорбука до включения/выключения записей.
+### Added
 
-## v0.1.6
+- Favorite lorebook entries with a star button.
+- Favorite entries are pinned above non-favorite entries.
+- Standard tags: Character, Location, Item, Lore, Plot, Relationship, Important, NSFW.
+- Custom user-created tags.
+- Persistent automatic color assignment for every tag.
+- Color-coded tag display on each entry card.
+- Tag filtering with OR / AND mode.
+- Tag search support through the main search field.
 
-- Changed custom checkbox rendering so selected ticks are white instead of black.
-- Added an inactive lorebook filter: inactive entries can now be shown from all lorebooks or from one selected lorebook.
-- Current manual selections are preserved while switching the inactive lorebook filter.
+### Changed
 
-## v0.1.5
+- Entry metadata is stored as a local UI layer in extension settings.
+- Entry IDs are more stable for metadata when SillyTavern entries do not expose `uid` or `id`.
 
-- Removed duplicate popup behavior for Chat Completion flow: preliminary text-prompt review is skipped when Chat Completion review will handle the generation.
-- Added a fallback skip for preliminary prompt review when no active Lorebook entries are detected.
-- Updated palette: main background `#171717`, entry/text background `#101010`, text color `#dcddd8`.
-- Added remembered choice memory:
-  - `Remember my choice after confirmation`;
-  - `Apply remembered choice`;
-  - `Clear remembered choice`.
-- Remembered choice stores disabled active entries and manually selected inactive entries in browser localStorage.
+### Preserved
 
-## v0.1.4
-
-Исправлена ошибка загрузки на мобильном/удалённом frontend:
-
-```text
-GET /scripts/script.js 404
-Extension "Lorebook Gatekeeper" failed to load
-```
-
-Причина: файл `src/worldInfoCollector.js` находился на один уровень глубже, поэтому путь `../../../../script.js` превращался в `/scripts/script.js`. Теперь используется правильный путь `../../../../../script.js`, который ведёт к `/script.js`.
+- Original lorebook entries are not modified.
+- Prompt patching logic remains temporary and generation-scoped.
+- Remembered choice remains compatible.
+- Previous request choice remains compatible.
+- Inactive lorebook prioritization remains compatible.
+- Prompt Itemization correction remains compatible.
