@@ -1,11 +1,9 @@
 import { eventSource, event_types, main_api, stopGeneration } from '../../../../script.js';
-
 import { findActiveEntries, splitActiveAndInactive } from './src/activationMatcher.js';
 import { collectWorldInfoEntries } from './src/worldInfoCollector.js';
 import { addTokenCounts, buildTokenStats } from './src/tokenCounter.js';
 import { getSettings, saveSettings } from './src/settings.js';
 import { getPromptTextFromChat } from './src/promptAdapter.js';
-
 import {
     injectManualEntriesIntoChat,
     injectManualEntriesIntoTextPrompt,
@@ -14,7 +12,6 @@ import {
     replaceEditedEntriesInChat,
     replaceEditedEntriesInTextPrompt,
 } from './src/promptPatcher.js';
-
 import { showLorebookReviewPopup } from './src/reviewPopup.js';
 import { MODULE_NAME } from './src/constants.js';
 import { isLocked } from './src/entryMetaStore.js';
@@ -29,7 +26,6 @@ function validateRequiredEvents() {
     if (!('CHAT_COMPLETION_PROMPT_READY' in event_types)) {
         throw new Error(`${MODULE_NAME}: CHAT_COMPLETION_PROMPT_READY event is not available. Update SillyTavern.`);
     }
-
     if (!('GENERATE_AFTER_COMBINE_PROMPTS' in event_types)) {
         throw new Error(`${MODULE_NAME}: GENERATE_AFTER_COMBINE_PROMPTS event is not available. Update SillyTavern.`);
     }
@@ -54,7 +50,9 @@ function addLaunchButton() {
     launchButton.appendChild(icon);
     launchButton.appendChild(textSpan);
 
-    const extensionsMenu = document.getElementById('prompt_inspector_wand_container') ?? document.getElementById('extensionsMenu');
+    const extensionsMenu = document.getElementById('prompt_inspector_wand_container')
+        ?? document.getElementById('extensionsMenu');
+
     if (!extensionsMenu) {
         console.warn(`${MODULE_NAME}: extensions menu was not found. Toggle button was not added.`);
         return;
@@ -71,20 +69,6 @@ function addLaunchButton() {
 
 function isLikelyChatCompletionMode() {
     return String(main_api || '').toLowerCase() === 'openai';
-}
-
-function clonePromptPayload(value) {
-    try {
-        if (typeof structuredClone === 'function') return structuredClone(value);
-    } catch (_) {
-        // Fallback below.
-    }
-
-    try {
-        return JSON.parse(JSON.stringify(value));
-    } catch (_) {
-        return value;
-    }
 }
 
 async function reviewPrompt(promptText, options = {}) {
@@ -107,7 +91,7 @@ async function reviewPrompt(promptText, options = {}) {
         inactiveEntries,
         statsBefore,
         settings,
-        promptPreview: options.promptPreview || null,
+        promptText,
     });
 
     saveSettings(settings);
@@ -116,12 +100,10 @@ async function reviewPrompt(promptText, options = {}) {
 
 async function handleReviewResult(result, applyChanges) {
     if (!result || result.action === 'discard') return;
-
     if (result.action === 'cancel') {
         await stopGeneration();
         return;
     }
-
     if (result.action === 'confirm') await applyChanges(result);
 }
 
@@ -129,28 +111,19 @@ eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
     if (!settings.enabled || data.dryRun || !Array.isArray(data.chat)) return;
 
     try {
-        const originalChat = clonePromptPayload(data.chat);
         const promptText = getPromptTextFromChat(data.chat);
-        const result = await reviewPrompt(promptText, {
-            promptPreview: {
-                type: 'chat',
-                label: 'Chat Completion payload',
-                payload: originalChat,
-            },
-        });
+        const result = await reviewPrompt(promptText);
 
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             removeEntriesFromChat(data.chat, disabledEntries);
             replaceEditedEntriesInChat(data.chat, selectedActiveEntries);
             injectManualEntriesIntoChat(data.chat, manualEntries);
-
             await queueItemizedPromptCorrection({
                 finalPrompt: data.chat,
                 selectedActiveEntries,
                 disabledEntries,
                 manualEntries,
             });
-
             console.debug(`${MODULE_NAME}: chat completion prompt updated.`);
         });
     } catch (error) {
@@ -168,28 +141,18 @@ eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
     }
 
     try {
-        const originalPrompt = String(data.prompt || '');
-        const result = await reviewPrompt(data.prompt, {
-            skipWhenNoActive: true,
-            promptPreview: {
-                type: 'text',
-                label: 'Text Completion prompt',
-                payload: originalPrompt,
-            },
-        });
+        const result = await reviewPrompt(data.prompt, { skipWhenNoActive: true });
 
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             data.prompt = removeEntriesFromTextPrompt(data.prompt, disabledEntries);
             data.prompt = replaceEditedEntriesInTextPrompt(data.prompt, selectedActiveEntries);
             data.prompt = injectManualEntriesIntoTextPrompt(data.prompt, manualEntries);
-
             await queueItemizedPromptCorrection({
                 finalPrompt: data.prompt,
                 selectedActiveEntries,
                 disabledEntries,
                 manualEntries,
             });
-
             console.debug(`${MODULE_NAME}: text completion prompt updated.`);
         });
     } catch (error) {
@@ -209,11 +172,6 @@ function injectTriggerReasonRollbackStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
-        .lbg-activation-reason,
-        .lbg-keyword-match {
-            display: none !important;
-        }
-
         .lbg-keyword-highlight {
             background: transparent !important;
             color: inherit !important;
