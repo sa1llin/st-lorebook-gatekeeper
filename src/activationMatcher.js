@@ -6,8 +6,12 @@ export function findActiveEntries(entries, promptText, options = {}) {
             const matchType = getEntryMatchType(entry, promptText, normalizedPrompt);
             if (matchType === 'none') return null;
 
-            const triggerScanTexts = buildTriggerScanTextsForEntry(entry, options);
-            const matchedKeywords = findMatchedKeywords(entry, triggerScanTexts, options);
+            const triggerScanTexts = options.enableTriggerWordDetection
+                ? buildTriggerScanTextsForEntry(entry, options)
+                : [];
+            const matchedKeywords = options.enableTriggerWordDetection
+                ? findMatchedKeywords(entry, triggerScanTexts, options)
+                : [];
 
             return {
                 ...entry,
@@ -17,6 +21,7 @@ export function findActiveEntries(entries, promptText, options = {}) {
                 matchType,
                 matchedKeywords,
                 triggerMatchSource: matchedKeywords.length ? getFirstTriggerMatchSource(entry, triggerScanTexts, matchedKeywords, options) : '',
+                triggerWordDetectionEnabled: Boolean(options.enableTriggerWordDetection),
             };
         })
         .filter(Boolean);
@@ -37,6 +42,7 @@ export function splitActiveAndInactive(entries, activeEntries) {
                 matchType: 'none',
                 matchedKeywords: [],
                 triggerMatchSource: '',
+                triggerWordDetectionEnabled: false,
             })),
     };
 }
