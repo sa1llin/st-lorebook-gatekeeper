@@ -1,5 +1,6 @@
 import { renderExtensionTemplateAsync } from '../../../../extensions.js';
 import { POPUP_TYPE, Popup } from '../../../../popup.js';
+
 import { saveSettings } from './settings.js';
 import {
     ALL_LOREBOOKS_FILTER,
@@ -37,8 +38,23 @@ import {
     toggleFavorite,
     toggleLocked,
 } from './entryMetaStore.js';
+import {
+    injectManualEntriesIntoChat,
+    injectManualEntriesIntoTextPrompt,
+    removeEntriesFromChat,
+    removeEntriesFromTextPrompt,
+    replaceEditedEntriesInChat,
+    replaceEditedEntriesInTextPrompt,
+} from './promptPatcher.js';
+import {
+    createProfileFromEntries,
+    deleteProfile,
+    loadProfiles,
+    replaceProfileSelection,
+    upsertProfile,
+} from './profileMemory.js';
 
-export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings }) {
+export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, statsBefore, settings, promptPreview = null }) {
     ensureEntryMetaSettings(settings);
 
     const template = $(await renderExtensionTemplateAsync(EXTENSION_PATH, 'popup'));
@@ -49,16 +65,22 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
         statsBefore,
         rememberedChoice: loadRememberedChoice(),
         previousChoice: loadPreviousChoice(),
+        profiles: loadProfiles(),
         inactiveBookFilter: ALL_LOREBOOKS_FILTER,
         compareRememberedVisible: false,
+        promptPreview,
+        promptPreviewVariant: 'before',
+        promptPreviewFormat: 'pretty',
     };
-    enforceEntryRules(state);
 
+    enforceEntryRules(state);
     initializeControls(template, state);
     renderTagFilterList(template, state);
     renderTagManagerList(template, state);
+    renderProfiles(template, state);
     renderLists(template, state);
     updateStats(template, state);
+    updatePromptPreview(template, state);
 
     const cancelGenerationButton = {
         text: 'Cancel generation',
@@ -67,10 +89,12 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
     };
 
     const popupResult = await showReviewDialog(template, cancelGenerationButton);
+
     if (popupResult === CANCEL_GENERATION_RESULT) return { action: 'cancel', disabledEntries: [], manualEntries: [] };
     if (!popupResult) return buildPersistentRuleResult(state);
 
     state.previousChoice = savePreviousChoiceFromState(state);
+
     if (Boolean(template.find('#lbgRememberChoice').prop('checked'))) {
         state.rememberedChoice = saveRememberedChoiceFromState(state);
     }
@@ -102,9 +126,11 @@ function buildPersistentRuleResult(state) {
 
 function createStateEntry(entry, selected, originallyActive, settings) {
     const content = String(entry?.content || '');
+    const stableId = String(entry?.stableId || entry?.id || `${entry?.bookName || 'book'}::${entry?.title || 'entry'}`);
     const stateEntry = {
         ...entry,
-        stableId: entry.stableId || entry.id,
+        id: String(entry?.id || stableId),
+        stableId,
         originalContent: content,
         content,
         selected,
@@ -241,41 +267,43 @@ function initializeControls(template, state) {
     template.find('#lbgViewMode').val(state.settings.compactView ? 'compact' : 'detailed');
     template.find('#lbgShowInactive').prop('checked', Boolean(state.settings.showInactiveEntries));
     template.find('#lbgTagFilterMode').val(state.settings.tagFilter?.mode || 'or');
-
     populateInactiveBookFilter(template, state);
     populatePreferredInactiveBooks(template, state);
 
-    template.find('#lbgSearch').on('input', () => {
-        renderLists(template, state);
-        updateStats(template, state);
+    template.find('.lbg-tab-button').on('click', (event) => {
+        const tab = String($(event.currentTarget).attr('data-lbg-tab') || 'entries');
+        template.find('.lbg-tab-button').removeClass('is-active');
+        template.find('.lbg-tab-panel').removeClass('is-active');
+        template.find(`.lbg-tab-button[data-lbg-tab="${escapeSelectorValue(tab)}"]`).addClass('is-active');
+        template.find(`.lbg-tab-panel[data-lbg-panel="${escapeSelectorValue(tab)}"]`).addClass('is-active');
+        if (tab === 'prompt') updatePromptPreview(template, state);
+        if (tab === 'profiles') renderProfiles(template, state);
     });
+
+    template.find('#lbgSearch').on('input', () => refreshEntryViews(template, state));
 
     template.find('#lbgSort').on('change', () => {
         state.settings.sortMode = template.find('#lbgSort').val();
         persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgViewMode').on('change', () => {
         state.settings.compactView = template.find('#lbgViewMode').val() === 'compact';
         persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgShowInactive').on('change', () => {
         state.settings.showInactiveEntries = Boolean(template.find('#lbgShowInactive').prop('checked'));
         persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgTagFilterMode').on('change', () => {
         state.settings.tagFilter.mode = template.find('#lbgTagFilterMode').val() === 'and' ? 'and' : 'or';
         persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgClearTagFilter').on('click', () => {
@@ -283,8 +311,7 @@ function initializeControls(template, state) {
         persistState(state);
         renderTagFilterList(template, state);
         renderTagManagerList(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgOpenTagManager').on('click', () => {
@@ -320,24 +347,21 @@ function initializeControls(template, state) {
 
     template.find('#lbgInactiveBookFilter').on('change', () => {
         state.inactiveBookFilter = String(template.find('#lbgInactiveBookFilter').val() || ALL_LOREBOOKS_FILTER);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgUseLinkedBooksFirst').on('click', () => {
         state.settings.preferredInactiveBookNames = getLinkedBookNames(state.inactiveEntries);
         persistState(state);
         populatePreferredInactiveBooks(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgClearPreferredBooks').on('click', () => {
         state.settings.preferredInactiveBookNames = [];
         persistState(state);
         populatePreferredInactiveBooks(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     template.find('#lbgApplyRememberedChoice').on('click', () => {
@@ -351,9 +375,7 @@ function initializeControls(template, state) {
         applyRememberedChoiceToState(state, state.rememberedChoice);
         markChoiceAppliedToState(state, state.rememberedChoice, 'remembered');
         enforceEntryRules(state);
-        renderLists(template, state);
-        updateStats(template, state);
-        updateChoiceInfo(template, state);
+        refreshAllViews(template, state);
         toastr.success('Lorebook Gatekeeper: remembered choice applied.');
     });
 
@@ -368,9 +390,7 @@ function initializeControls(template, state) {
         applyPreviousChoiceToState(state, state.previousChoice);
         markChoiceAppliedToState(state, state.previousChoice, 'previous');
         enforceEntryRules(state);
-        renderLists(template, state);
-        updateStats(template, state);
-        updateChoiceInfo(template, state);
+        refreshAllViews(template, state);
         toastr.success('Lorebook Gatekeeper: previous request choice applied.');
     });
 
@@ -393,8 +413,6 @@ function initializeControls(template, state) {
         toastr.info('Lorebook Gatekeeper: remembered choice cleared.');
     });
 
-    updateChoiceInfo(template, state);
-
     template.find('#lbgDisableAllActive').on('click', () => {
         state.activeEntries.forEach((entry) => {
             if (!isLocked(state.settings, entry) && !isBlocked(state.settings, entry)) {
@@ -403,9 +421,7 @@ function initializeControls(template, state) {
             }
         });
         enforceEntryRules(state);
-        updateChoiceInfo(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshAllViews(template, state);
     });
 
     template.find('#lbgEnableAllActive').on('click', () => {
@@ -414,10 +430,88 @@ function initializeControls(template, state) {
             delete entry.selectionSource;
         });
         enforceEntryRules(state);
-        updateChoiceInfo(template, state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshAllViews(template, state);
     });
+
+    template.find('#lbgSaveProfile').on('click', () => {
+        saveCurrentSelectionAsProfile(template, state);
+    });
+
+    template.find('#lbgProfileName').on('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            saveCurrentSelectionAsProfile(template, state);
+        }
+    });
+
+    template.find('#lbgProfilesList').on('click', '[data-lbg-profile-action]', (event) => {
+        const button = event.currentTarget;
+        const action = String(button.getAttribute('data-lbg-profile-action') || '');
+        const profileId = String(button.getAttribute('data-lbg-profile-id') || '');
+        const profile = state.profiles.find((item) => item.id === profileId);
+        if (!profile) return;
+
+        if (action === 'apply') {
+            applyProfileToState(profile, state);
+            refreshAllViews(template, state);
+            toastr.success(`Lorebook Gatekeeper: profile "${profile.name}" applied.`);
+        }
+
+        if (action === 'replace') {
+            const confirmed = window.confirm(`Replace saved profile "${profile.name}" with the current selection?`);
+            if (!confirmed) return;
+            state.profiles = replaceProfileSelection(profile.id, getAllEntries(state));
+            renderProfiles(template, state);
+            toastr.success('Lorebook Gatekeeper: profile updated.');
+        }
+
+        if (action === 'delete') {
+            const confirmed = window.confirm(`Delete saved profile "${profile.name}"?`);
+            if (!confirmed) return;
+            state.profiles = deleteProfile(profile.id);
+            renderProfiles(template, state);
+            toastr.info('Lorebook Gatekeeper: profile deleted.');
+        }
+    });
+
+    template.find('#lbgPromptPreviewVariant').on('change', () => {
+        state.promptPreviewVariant = String(template.find('#lbgPromptPreviewVariant').val() || 'before');
+        updatePromptPreview(template, state);
+    });
+
+    template.find('#lbgPromptPreviewFormat').on('change', () => {
+        state.promptPreviewFormat = String(template.find('#lbgPromptPreviewFormat').val() || 'pretty');
+        updatePromptPreview(template, state);
+    });
+
+    template.find('#lbgRefreshPromptPreview').on('click', () => updatePromptPreview(template, state));
+    template.find('#lbgCopyPromptPreview').on('click', async () => {
+        const text = String(template.find('#lbgPromptPreviewOutput').text() || '');
+        if (!text) return;
+
+        try {
+            await navigator.clipboard.writeText(text);
+            toastr.success('Lorebook Gatekeeper: prompt preview copied.');
+        } catch (_) {
+            window.prompt('Copy prompt preview:', text);
+        }
+    });
+
+    updateChoiceInfo(template, state);
+}
+
+function refreshEntryViews(template, state) {
+    renderLists(template, state);
+    updateStats(template, state);
+    updatePromptPreview(template, state);
+}
+
+function refreshAllViews(template, state) {
+    updateChoiceInfo(template, state);
+    renderLists(template, state);
+    updateStats(template, state);
+    renderProfiles(template, state);
+    updatePromptPreview(template, state);
 }
 
 function populateInactiveBookFilter(template, state) {
@@ -439,8 +533,8 @@ function populatePreferredInactiveBooks(template, state) {
     const bookInfos = getBookInfos(state.inactiveEntries);
     const availableBookNames = new Set(bookInfos.map((info) => info.bookName));
     const preferred = new Set(toStringArray(state.settings.preferredInactiveBookNames).filter((bookName) => availableBookNames.has(bookName)));
-
     state.settings.preferredInactiveBookNames = [...preferred];
+
     container.empty();
 
     if (!bookInfos.length) {
@@ -462,8 +556,7 @@ function populatePreferredInactiveBooks(template, state) {
 
             state.settings.preferredInactiveBookNames = [...next].filter((bookName) => availableBookNames.has(bookName));
             persistState(state);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshEntryViews(template, state);
         });
 
         const text = document.createElement('span');
@@ -495,7 +588,6 @@ function renderTagFilterList(template, state) {
         button.style.setProperty('--tag-color', tag.color);
         button.textContent = tag.label;
         button.title = tag.type === 'standard' ? 'Standard tag' : 'Custom tag';
-
         button.addEventListener('click', () => {
             const next = new Set(state.settings.tagFilter.selectedTags || []);
             if (next.has(tag.name)) next.delete(tag.name);
@@ -505,8 +597,7 @@ function renderTagFilterList(template, state) {
             persistState(state);
             renderTagFilterList(template, state);
             renderTagManagerList(template, state);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshEntryViews(template, state);
         });
 
         container.append(button);
@@ -545,7 +636,6 @@ function renderTagManagerList(template, state) {
         action.title = tag.type === 'standard'
             ? 'Remove this standard tag from all entries. The standard tag itself stays available.'
             : 'Delete this custom tag and remove it from all entries.';
-
         action.addEventListener('click', () => {
             const confirmed = window.confirm(
                 tag.type === 'standard'
@@ -558,8 +648,7 @@ function renderTagManagerList(template, state) {
             persistState(state);
             renderTagFilterList(template, state);
             renderTagManagerList(template, state);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshEntryViews(template, state);
         });
 
         row.appendChild(chip);
@@ -684,10 +773,7 @@ function createRememberedCompareElement(state) {
 }
 
 function getCurrentSelectedEntryIds(state) {
-    return new Set([
-        ...state.activeEntries.filter((entry) => entry.selected).map((entry) => entry.id),
-        ...state.inactiveEntries.filter((entry) => entry.selected).map((entry) => entry.id),
-    ]);
+    return new Set(getAllEntries(state).filter((entry) => entry.selected).map((entry) => entry.id));
 }
 
 function createCompareSection(title, ids, state) {
@@ -720,7 +806,7 @@ function createCompareSection(title, ids, state) {
 }
 
 function findEntryById(state, id) {
-    return [...state.activeEntries, ...state.inactiveEntries].find((entry) => entry.id === id) || null;
+    return getAllEntries(state).find((entry) => entry.id === id) || null;
 }
 
 function formatEntryNameForCompare(entry, id) {
@@ -730,6 +816,7 @@ function formatEntryNameForCompare(entry, id) {
 }
 
 function getActivationReasonText(entry) {
+    if (entry.selectionSource === 'profile') return 'Saved profile';
     if (entry.selectionSource === 'remembered') return 'Remembered choice';
     if (entry.selectionSource === 'previous') return 'Previous request choice';
     if (entry.selectionSource === 'manual' || (!entry.originallyActive && entry.selected)) return 'Manually added';
@@ -755,7 +842,6 @@ function getActivationReasonText(entry) {
 function getKeywordMatchedText(entry) {
     const matchedKeywords = toStringArray(entry.matchedKeywords);
     if (!matchedKeywords.length) return '';
-
     if (matchedKeywords.length === 1) return `Keyword matched: ${matchedKeywords[0]}`;
     return `Keywords matched: ${matchedKeywords.join(', ')}`;
 }
@@ -801,6 +887,7 @@ function renderLists(template, state) {
     const query = String(template.find('#lbgSearch').val() || '').toLowerCase().trim();
     const sortMode = template.find('#lbgSort').val() || 'tokens_desc';
     const showInactive = Boolean(template.find('#lbgShowInactive').prop('checked'));
+
     const activeContainer = template.find('#lbgActiveEntries');
     const inactiveContainer = template.find('#lbgInactiveEntries');
     const inactiveSection = template.find('#lbgInactiveSection');
@@ -851,9 +938,7 @@ function renderEntrySet(container, entries, state, template) {
             }
 
             enforceEntryRules(state);
-            updateChoiceInfo(template, state);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshAllViews(template, state);
         }));
     }
 }
@@ -875,6 +960,7 @@ function createEntryElement(entry, state, template, onToggle) {
         blocked ? 'lbg-entry-blocked' : '',
         edited ? 'lbg-entry-edited' : '',
     ].filter(Boolean).join(' ');
+    element.dataset.lbgEntryId = entry.id;
 
     const top = document.createElement('div');
     top.className = 'lbg-entry-top';
@@ -886,16 +972,12 @@ function createEntryElement(entry, state, template, onToggle) {
     checkbox.type = 'checkbox';
     checkbox.checked = Boolean(entry.selected);
     checkbox.disabled = locked || blocked;
-    checkbox.title = blocked
-        ? 'Never include is enabled for this entry.'
-        : locked
-            ? 'Locked entries stay selected until unlocked.'
-            : 'Include this entry in the prompt.';
+    checkbox.title = blocked ? 'Never include is enabled for this entry.' : locked ? 'Locked entries stay selected until unlocked.' : 'Include this entry in the prompt.';
     checkbox.addEventListener('change', onToggle);
 
     const title = document.createElement('span');
     title.className = 'lbg-entry-title';
-    title.textContent = entry.title;
+    title.textContent = entry.title || 'Untitled entry';
 
     label.appendChild(checkbox);
     label.appendChild(title);
@@ -913,8 +995,7 @@ function createEntryElement(entry, state, template, onToggle) {
         event.stopPropagation();
         toggleFavorite(state.settings, entry);
         persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
 
     if (compactView) {
@@ -930,10 +1011,8 @@ function createEntryElement(entry, state, template, onToggle) {
             event.stopPropagation();
             toggleLocked(state.settings, entry);
             enforceEntryRules(state);
-            updateChoiceInfo(template, state);
             persistState(state);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshAllViews(template, state);
         });
 
         const blockButton = document.createElement('button');
@@ -946,10 +1025,8 @@ function createEntryElement(entry, state, template, onToggle) {
             event.stopPropagation();
             toggleBlocked(state.settings, entry);
             enforceEntryRules(state);
-            updateChoiceInfo(template, state);
             persistState(state);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshAllViews(template, state);
         });
 
         const menuButton = document.createElement('button');
@@ -981,7 +1058,7 @@ function createEntryElement(entry, state, template, onToggle) {
 
     const bookBadge = document.createElement('span');
     bookBadge.className = 'lbg-book-badge';
-    bookBadge.textContent = entry.bookName;
+    bookBadge.textContent = entry.bookName || 'Unknown book';
 
     meta.appendChild(tokenBadge);
     meta.appendChild(bookBadge);
@@ -993,11 +1070,10 @@ function createEntryElement(entry, state, template, onToggle) {
 
         const matchBadge = document.createElement('span');
         matchBadge.className = 'lbg-match-badge';
-        matchBadge.textContent = entry.originallyActive ? `match: ${entry.matchType}` : 'manual candidate';
+        matchBadge.textContent = entry.originallyActive ? `match: ${entry.matchType || 'prompt'}` : 'manual candidate';
 
         meta.appendChild(sourceBadge);
         meta.appendChild(matchBadge);
-
         if (locked) meta.appendChild(createStatusBadge('Locked', 'lbg-lock-badge'));
         if (blocked) meta.appendChild(createStatusBadge('Never include', 'lbg-block-badge'));
         if (edited) meta.appendChild(createStatusBadge('Edited for this prompt', 'lbg-edit-badge'));
@@ -1008,7 +1084,6 @@ function createEntryElement(entry, state, template, onToggle) {
     element.appendChild(top);
     element.appendChild(meta);
     if (tags.childElementCount) element.appendChild(tags);
-
     if (compactView) return element;
 
     const reason = document.createElement('div');
@@ -1035,11 +1110,8 @@ function createEntryElement(entry, state, template, onToggle) {
     if (edited) {
         const editHint = document.createElement('div');
         editHint.className = 'lbg-edit-hint';
-        editHint.textContent = 'Temporary prompt version is shown below. Original lorebook entry is not changed.';
-        element.appendChild(keys);
+        editHint.textContent = 'Temporary prompt version is shown below. Original Lorebook entry is unchanged.';
         element.appendChild(editHint);
-        element.appendChild(preview);
-        return element;
     }
 
     element.appendChild(keys);
@@ -1048,68 +1120,18 @@ function createEntryElement(entry, state, template, onToggle) {
     return element;
 }
 
-function createStatusBadge(text, className) {
-    const badge = document.createElement('span');
-    badge.className = `lbg-status-badge ${className}`;
-    badge.textContent = text;
-    return badge;
-}
-
-function createEntryTagRow(entry, settings) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'lbg-entry-tags lbg-entry-tags-compact';
-
-    const tags = getEntryTags(settings, entry);
-    for (const tagName of tags) {
-        wrapper.appendChild(createStaticTagChip(tagName, settings));
-    }
-
-    return wrapper;
-}
-
 function createEntryMenu(entry, state, template) {
     const menu = document.createElement('div');
     menu.className = 'lbg-entry-menu';
 
     const currentTags = getEntryTags(state.settings, entry);
-    const availableTags = getAllAvailableTags(state.settings);
-    const standardTags = availableTags.filter((tag) => tag.type === 'standard');
-
-    const lockAction = document.createElement('button');
-    lockAction.type = 'button';
-    lockAction.className = 'lbg-menu-action';
-    lockAction.textContent = isLocked(state.settings, entry) ? 'Unlock entry' : 'Lock entry';
-    lockAction.title = 'Locked entries stay selected and are always included in the prompt.';
-    lockAction.addEventListener('click', () => {
-        toggleLocked(state.settings, entry);
-        enforceEntryRules(state);
-        updateChoiceInfo(template, state);
-        persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
-    });
-    menu.appendChild(lockAction);
-
-    const blockAction = document.createElement('button');
-    blockAction.type = 'button';
-    blockAction.className = `lbg-menu-action ${isBlocked(state.settings, entry) ? '' : 'lbg-menu-danger'}`;
-    blockAction.textContent = isBlocked(state.settings, entry) ? 'Allow this entry again' : 'Never include this entry';
-    blockAction.title = 'Never include disables this entry even when keywords activate it.';
-    blockAction.addEventListener('click', () => {
-        toggleBlocked(state.settings, entry);
-        enforceEntryRules(state);
-        updateChoiceInfo(template, state);
-        persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
-    });
-    menu.appendChild(blockAction);
+    const standardTags = getAllAvailableTags(state.settings).filter((tag) => tag.type === 'standard');
 
     const editAction = document.createElement('button');
     editAction.type = 'button';
     editAction.className = 'lbg-menu-action';
-    editAction.textContent = hasTemporaryEdit(entry) ? 'Edit temporary prompt version' : 'Edit for this prompt';
-    editAction.title = 'Temporarily changes only the prompt version. The original lorebook entry is not edited.';
+    editAction.textContent = 'Edit for this prompt';
+    editAction.title = 'Temporarily replace this entry content for the current generation. The original lorebook entry is not edited.';
     editAction.addEventListener('click', async () => {
         template.find('.lbg-entry-menu').removeClass('is-open');
         const result = await showTemporaryEditDialog(entry);
@@ -1121,8 +1143,7 @@ function createEntryMenu(entry, state, template) {
             setTemporaryEdit(entry, result.content);
         }
 
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshAllViews(template, state);
     });
     menu.appendChild(editAction);
 
@@ -1133,8 +1154,7 @@ function createEntryMenu(entry, state, template) {
         resetEditAction.textContent = 'Reset temporary edit';
         resetEditAction.addEventListener('click', () => {
             clearTemporaryEdit(entry);
-            renderLists(template, state);
-            updateStats(template, state);
+            refreshAllViews(template, state);
         });
         menu.appendChild(resetEditAction);
     }
@@ -1146,15 +1166,13 @@ function createEntryMenu(entry, state, template) {
     favoriteAction.addEventListener('click', () => {
         toggleFavorite(state.settings, entry);
         persistState(state);
-        renderLists(template, state);
-        updateStats(template, state);
+        refreshEntryViews(template, state);
     });
     menu.appendChild(favoriteAction);
 
     menu.appendChild(createMenuSectionTitle('Standard tags'));
     const standardGrid = document.createElement('div');
     standardGrid.className = 'lbg-menu-tag-grid';
-
     for (const tag of standardTags) {
         const tagButton = createMenuTagButton(tag, state.settings, currentTags.includes(tag.name));
         tagButton.addEventListener('click', () => {
@@ -1163,7 +1181,6 @@ function createEntryMenu(entry, state, template) {
         });
         standardGrid.appendChild(tagButton);
     }
-
     menu.appendChild(standardGrid);
 
     menu.appendChild(createMenuSectionTitle('Custom tag'));
@@ -1184,7 +1201,6 @@ function createEntryMenu(entry, state, template) {
     const addCustomTag = () => {
         const tagName = normalizeTagName(input.value);
         if (!tagName) return;
-
         addEntryTag(state.settings, entry, tagName);
         input.value = '';
         refreshTagDependentViews(template, state);
@@ -1206,13 +1222,8 @@ function createEntryMenu(entry, state, template) {
         menu.appendChild(createMenuSectionTitle('Remove from this entry'));
         const removeGrid = document.createElement('div');
         removeGrid.className = 'lbg-menu-tag-grid';
-
         for (const tagName of currentTags) {
-            const tag = {
-                name: tagName,
-                label: formatTagLabel(tagName),
-                color: getTagColor(state.settings, tagName),
-            };
+            const tag = { name: tagName, label: formatTagLabel(tagName), color: getTagColor(state.settings, tagName) };
             const removeButton = createMenuTagButton(tag, state.settings, false, '× ');
             removeButton.addEventListener('click', () => {
                 removeEntryTag(state.settings, entry, tagName);
@@ -1220,7 +1231,6 @@ function createEntryMenu(entry, state, template) {
             });
             removeGrid.appendChild(removeButton);
         }
-
         menu.appendChild(removeGrid);
 
         const clearEntryTags = document.createElement('button');
@@ -1259,6 +1269,11 @@ function showTemporaryEditDialog(entry) {
 
         const dialog = document.createElement('div');
         dialog.className = 'lbg-edit-dialog';
+        dialog.style.height = `${getSavedEditDialogHeight()}px`;
+
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'lbg-edit-resize-handle';
+        resizeHandle.textContent = 'Drag to resize';
 
         const title = document.createElement('h3');
         title.textContent = 'Edit for this prompt';
@@ -1269,154 +1284,108 @@ function showTemporaryEditDialog(entry) {
 
         const hint = document.createElement('div');
         hint.className = 'lbg-edit-hint';
-        hint.textContent = 'Original lorebook entry remains untouched. Temporary prompt version will be used only once.';
+        hint.textContent = 'Original lorebook entry remains untouched. This text is used only for the current prompt.';
 
         const textarea = document.createElement('textarea');
         textarea.className = 'text_pole lbg-edit-textarea';
         textarea.value = getEntryPromptContent(entry);
-        textarea.spellcheck = false;
-
-        const resizeHandle = document.createElement('button');
-        resizeHandle.type = 'button';
-        resizeHandle.className = 'lbg-edit-resize-handle';
-        resizeHandle.textContent = '↕ Drag to resize';
-        resizeHandle.setAttribute('aria-label', 'Drag up or down to resize the temporary prompt editor');
 
         const footer = document.createElement('div');
         footer.className = 'lbg-edit-footer';
 
-        const cancelButton = document.createElement('button');
-        cancelButton.type = 'button';
-        cancelButton.className = 'menu_button';
-        cancelButton.textContent = 'Cancel';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'menu_button';
+        reset.textContent = 'Reset to original';
 
-        const resetButton = document.createElement('button');
-        resetButton.type = 'button';
-        resetButton.className = 'menu_button';
-        resetButton.textContent = 'Reset to original';
-        resetButton.disabled = !hasTemporaryEdit(entry);
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'menu_button';
+        cancel.textContent = 'Cancel';
 
-        const saveButton = document.createElement('button');
-        saveButton.type = 'button';
-        saveButton.className = 'menu_button lbg-edit-save-button';
-        saveButton.textContent = 'Use temporary version';
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.className = 'menu_button';
+        save.textContent = 'Save for this prompt';
 
-        footer.appendChild(cancelButton);
-        footer.appendChild(resetButton);
-        footer.appendChild(saveButton);
-
+        footer.appendChild(reset);
+        footer.appendChild(cancel);
+        footer.appendChild(save);
+        dialog.appendChild(resizeHandle);
         dialog.appendChild(title);
         dialog.appendChild(subtitle);
         dialog.appendChild(hint);
         dialog.appendChild(textarea);
-        dialog.appendChild(resizeHandle);
         dialog.appendChild(footer);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
         document.body.classList.add('lbg-edit-open');
-
-        const cleanupResize = setupTemporaryEditResize(dialog, resizeHandle);
+        textarea.focus();
 
         const cleanup = (result) => {
-            document.removeEventListener('keydown', onKeyDown);
-            cleanupResize?.();
             document.body.classList.remove('lbg-edit-open');
             overlay.remove();
             resolve(result);
         };
 
-        function onKeyDown(event) {
-            if (event.key === 'Escape') cleanup(null);
-        }
-
-        cancelButton.addEventListener('click', () => cleanup(null), { once: true });
-        resetButton.addEventListener('click', () => cleanup({ action: 'reset' }), { once: true });
-        saveButton.addEventListener('click', () => cleanup({ action: 'save', content: textarea.value }), { once: true });
+        reset.addEventListener('click', () => cleanup({ action: 'reset' }));
+        cancel.addEventListener('click', () => cleanup(null));
+        save.addEventListener('click', () => cleanup({ action: 'save', content: textarea.value }));
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) cleanup(null);
         });
-        document.addEventListener('keydown', onKeyDown);
-        textarea.focus();
-        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        installEditDialogResize(resizeHandle, dialog);
     });
 }
 
+function getSavedEditDialogHeight() {
+    const minimum = Math.max(360, Math.round(window.innerHeight * 0.5));
+    const maximum = Math.max(minimum, Math.round(window.innerHeight * 0.9));
+    const saved = Number(localStorage.getItem('LorebookGatekeeper_editDialogHeight') || 0);
+    return Math.min(maximum, Math.max(minimum, saved || minimum));
+}
 
-function setupTemporaryEditResize(dialog, resizeHandle) {
-    const STORAGE_KEY = 'lbg.temporaryEditDialogHeight';
-    const MIN_DIALOG_HEIGHT = 360;
+function installEditDialogResize(handle, dialog) {
     let startY = 0;
     let startHeight = 0;
-    let activePointerId = null;
 
-    const getMaxHeight = () => Math.max(MIN_DIALOG_HEIGHT, Math.floor(window.innerHeight * 0.94));
-    const getDefaultHeight = () => Math.max(Math.floor(window.innerHeight * 0.5), Math.min(620, getMaxHeight()));
-    const clampHeight = (height) => Math.min(getMaxHeight(), Math.max(MIN_DIALOG_HEIGHT, Math.floor(height)));
-
-    const applyHeight = (height, persist = false) => {
-        const nextHeight = clampHeight(height);
+    const onMove = (event) => {
+        const y = event.touches?.[0]?.clientY ?? event.clientY;
+        const delta = startY - y;
+        const minimum = Math.max(320, Math.round(window.innerHeight * 0.5));
+        const maximum = Math.max(minimum, Math.round(window.innerHeight * 0.92));
+        const nextHeight = Math.min(maximum, Math.max(minimum, startHeight + delta));
         dialog.style.height = `${nextHeight}px`;
-        dialog.style.maxHeight = `${getMaxHeight()}px`;
-        if (persist) {
-            try {
-                localStorage.setItem(STORAGE_KEY, String(nextHeight));
-            } catch (_error) {
-                // Silently ignore unavailable storage in restricted contexts.
-            }
-        }
+        localStorage.setItem('LorebookGatekeeper_editDialogHeight', String(nextHeight));
     };
 
-    let savedHeight = 0;
-    try {
-        savedHeight = Number.parseInt(localStorage.getItem(STORAGE_KEY) || '', 10) || 0;
-    } catch (_error) {
-        savedHeight = 0;
-    }
-    applyHeight(savedHeight || getDefaultHeight(), false);
-
-    const onPointerMove = (event) => {
-        if (activePointerId !== event.pointerId) return;
-        event.preventDefault();
-        applyHeight(startHeight + (event.clientY - startY), true);
+    const onEnd = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onEnd);
+        window.removeEventListener('touchmove', onMove);
+        window.removeEventListener('touchend', onEnd);
     };
 
-    const finishResize = (event) => {
-        if (activePointerId !== event.pointerId) return;
-        activePointerId = null;
-        resizeHandle.classList.remove('is-resizing');
-        document.body.classList.remove('lbg-edit-resizing');
-        resizeHandle.releasePointerCapture?.(event.pointerId);
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', finishResize);
-        window.removeEventListener('pointercancel', finishResize);
-    };
-
-    resizeHandle.addEventListener('pointerdown', (event) => {
-        if (event.button !== undefined && event.button !== 0) return;
-        event.preventDefault();
-        activePointerId = event.pointerId;
-        startY = event.clientY;
+    const onStart = (event) => {
+        startY = event.touches?.[0]?.clientY ?? event.clientY;
         startHeight = dialog.getBoundingClientRect().height;
-        resizeHandle.classList.add('is-resizing');
-        document.body.classList.add('lbg-edit-resizing');
-        resizeHandle.setPointerCapture?.(event.pointerId);
-        window.addEventListener('pointermove', onPointerMove, { passive: false });
-        window.addEventListener('pointerup', finishResize);
-        window.addEventListener('pointercancel', finishResize);
-    });
-
-    const onWindowResize = () => applyHeight(dialog.getBoundingClientRect().height, false);
-    window.addEventListener('resize', onWindowResize, { passive: true });
-
-    return () => {
-        activePointerId = null;
-        resizeHandle.classList.remove('is-resizing');
-        document.body.classList.remove('lbg-edit-resizing');
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', finishResize);
-        window.removeEventListener('pointercancel', finishResize);
-        window.removeEventListener('resize', onWindowResize);
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onEnd);
+        window.addEventListener('touchmove', onMove, { passive: false });
+        window.addEventListener('touchend', onEnd);
+        event.preventDefault();
     };
+
+    handle.addEventListener('mousedown', onStart);
+    handle.addEventListener('touchstart', onStart, { passive: false });
+}
+
+function refreshTagDependentViews(template, state) {
+    persistState(state);
+    renderTagFilterList(template, state);
+    renderTagManagerList(template, state);
+    refreshEntryViews(template, state);
 }
 
 function createMenuSectionTitle(text) {
@@ -1426,22 +1395,30 @@ function createMenuSectionTitle(text) {
     return title;
 }
 
-function createMenuTagButton(tag, settings, disabled = false, prefix = '') {
+function createMenuTagButton(tag, settings, selected, prefix = '') {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'lbg-menu-tag-button';
+    button.className = `lbg-menu-tag ${selected ? 'is-selected' : ''}`;
     button.style.setProperty('--tag-color', tag.color || getTagColor(settings, tag.name));
     button.textContent = `${prefix}${tag.label || formatTagLabel(tag.name)}`;
-    button.disabled = disabled;
     return button;
 }
 
+function createEntryTagRow(entry, settings) {
+    const row = document.createElement('div');
+    row.className = 'lbg-entry-tags';
+
+    for (const tagName of getEntryTags(settings, entry)) {
+        row.appendChild(createStaticTagChip(tagName, settings));
+    }
+
+    return row;
+}
+
 function createStaticTagChip(tagName, settings) {
-    const color = getTagColor(settings, tagName);
     const chip = document.createElement('span');
-    chip.className = 'lbg-tag lbg-tag-compact';
-    chip.style.setProperty('--tag-color', color);
-    chip.title = formatTagLabel(tagName);
+    chip.className = 'lbg-tag';
+    chip.style.setProperty('--tag-color', getTagColor(settings, tagName));
 
     const dot = document.createElement('span');
     dot.className = 'lbg-tag-dot';
@@ -1452,39 +1429,14 @@ function createStaticTagChip(tagName, settings) {
 
     chip.appendChild(dot);
     chip.appendChild(label);
-
     return chip;
 }
 
-function refreshTagDependentViews(template, state) {
-    persistState(state);
-    renderTagFilterList(template, state);
-    renderTagManagerList(template, state);
-    renderLists(template, state);
-    updateStats(template, state);
-}
-
-function createNoticeElement(text) {
-    const element = document.createElement('div');
-    element.className = 'lbg-notice';
-    element.textContent = text;
-    return element;
-}
-
-function updateStats(template, state) {
-    const selectedActive = state.activeEntries.filter((entry) => entry.selected);
-    const disabledActive = state.activeEntries.filter((entry) => !entry.selected);
-    const selectedManual = state.inactiveEntries.filter((entry) => entry.selected);
-    const selectedTokens = sumTokens([...selectedActive, ...selectedManual]);
-    const savedTokens = sumTokens(disabledActive);
-    const addedTokens = sumTokens(selectedManual);
-
-    template.find('#lbgActiveCount').text(state.activeEntries.length);
-    template.find('#lbgInactiveCount').text(state.inactiveEntries.length);
-    template.find('#lbgSelectedTokens').text(selectedTokens);
-    template.find('#lbgSavedTokens').text(savedTokens);
-    template.find('#lbgAddedTokens').text(addedTokens);
-    template.find('#lbgBeforeTokens').text(state.statsBefore?.activeTokens || 0);
+function createStatusBadge(text, className) {
+    const badge = document.createElement('span');
+    badge.className = `lbg-status-badge ${className}`;
+    badge.textContent = text;
+    return badge;
 }
 
 function filterAndSortEntries(entries, query, sortMode, state) {
@@ -1492,126 +1444,332 @@ function filterAndSortEntries(entries, query, sortMode, state) {
 }
 
 function filterEntries(entries, query, state) {
-    if (!query) return [...entries];
+    if (!query) return entries;
 
     return entries.filter((entry) => {
-        const tagText = getEntryTags(state.settings, entry).join(' ');
-        const haystack = [entry.title, entry.bookName, entry.content, getEntryPromptContent(entry), tagText, ...(entry.keys || []), ...(entry.secondaryKeys || [])]
-            .join(' ')
-            .toLowerCase();
-
+        const haystack = [
+            entry.title,
+            entry.bookName,
+            entry.content,
+            entry.keys?.join?.(' '),
+            entry.keysecondary?.join?.(' '),
+            getEntryTags(state.settings, entry).join(' '),
+        ].map((value) => String(value || '').toLowerCase()).join('\n');
         return haystack.includes(query);
     });
 }
 
 function filterEntriesByTags(entries, state) {
-    const selectedTags = toStringArray(state.settings.tagFilter?.selectedTags).map(normalizeTagName).filter(Boolean);
+    const selectedTags = toStringArray(state.settings.tagFilter?.selectedTags);
     if (!selectedTags.length) return entries;
 
     const mode = state.settings.tagFilter?.mode === 'and' ? 'and' : 'or';
-
     return entries.filter((entry) => {
-        const entryTags = getEntryTags(state.settings, entry);
-        if (mode === 'and') return selectedTags.every((tag) => entryTags.includes(tag));
-        return selectedTags.some((tag) => entryTags.includes(tag));
+        const entryTags = new Set(getEntryTags(state.settings, entry));
+        if (mode === 'and') return selectedTags.every((tag) => entryTags.has(tag));
+        return selectedTags.some((tag) => entryTags.has(tag));
     });
+}
+
+function sortEntries(entries, sortMode, state) {
+    const copy = [...entries];
+    copy.sort((a, b) => {
+        const favoriteDelta = Number(isFavorite(state.settings, b)) - Number(isFavorite(state.settings, a));
+        if (favoriteDelta) return favoriteDelta;
+
+        if (sortMode === 'tokens_asc') return (a.tokens || 0) - (b.tokens || 0);
+        if (sortMode === 'book') return String(a.bookName || '').localeCompare(String(b.bookName || '')) || String(a.title || '').localeCompare(String(b.title || ''));
+        if (sortMode === 'title') return String(a.title || '').localeCompare(String(b.title || ''));
+        return (b.tokens || 0) - (a.tokens || 0);
+    });
+    return copy;
 }
 
 function sortInactiveEntries(entries, sortMode, state) {
     const preferred = new Set(toStringArray(state.settings.preferredInactiveBookNames));
     const sorted = sortEntries(entries, sortMode, state);
-
-    return sorted.sort((a, b) => {
-        const statusA = getEntryStatusPriority(a, state.settings);
-        const statusB = getEntryStatusPriority(b, state.settings);
-        if (statusA !== statusB) return statusA - statusB;
-
-        const priorityA = getInactivePriority(a, preferred);
-        const priorityB = getInactivePriority(b, preferred);
-        if (priorityA !== priorityB) return priorityA - priorityB;
-
-        return 0;
-    });
+    sorted.sort((a, b) => Number(preferred.has(b.bookName)) - Number(preferred.has(a.bookName)));
+    return sorted;
 }
 
-function getInactivePriority(entry, preferred) {
-    if (preferred.has(entry.bookName)) return 0;
-    return 1 + getSourcePriority(entry.sourceType);
+function updateStats(template, state) {
+    const selectedActiveEntries = state.activeEntries.filter((entry) => entry.selected);
+    const disabledEntries = state.activeEntries.filter((entry) => !entry.selected);
+    const manualEntries = state.inactiveEntries.filter((entry) => entry.selected);
+
+    const activeTokens = sumTokens(state.activeEntries);
+    const selectedTokens = sumTokens(selectedActiveEntries) + sumTokens(manualEntries);
+    const addedTokens = sumTokens(manualEntries);
+    const savedTokens = sumTokens(disabledEntries);
+
+    template.find('#lbgActiveCount').text(state.activeEntries.length);
+    template.find('#lbgInactiveCount').text(state.inactiveEntries.length);
+    template.find('#lbgBeforeTokens').text(activeTokens);
+    template.find('#lbgSelectedTokens').text(selectedTokens);
+    template.find('#lbgAddedTokens').text(addedTokens);
+    template.find('#lbgSavedTokens').text(savedTokens);
 }
 
-function getEntryStatusPriority(entry, settings) {
-    if (isLocked(settings, entry)) return 0;
-    if (isBlocked(settings, entry)) return 3;
-    if (isFavorite(settings, entry)) return 1;
-    return 2;
-}
-
-function sortEntries(entries, sortMode, state) {
-    const result = [...entries];
-
-    switch (sortMode) {
-        case 'tokens_asc':
-            result.sort((a, b) => Number(a.tokens || 0) - Number(b.tokens || 0));
-            break;
-        case 'tokens_desc':
-            result.sort((a, b) => Number(b.tokens || 0) - Number(a.tokens || 0));
-            break;
-        case 'book':
-            result.sort((a, b) => String(a.bookName).localeCompare(String(b.bookName)) || String(a.title).localeCompare(String(b.title)));
-            break;
-        case 'title':
-            result.sort((a, b) => String(a.title).localeCompare(String(b.title)));
-            break;
-        default:
-            break;
+function saveCurrentSelectionAsProfile(template, state) {
+    const selectedCount = getAllEntries(state).filter((entry) => entry.selected).length;
+    if (!selectedCount) {
+        toastr.info('Lorebook Gatekeeper: select at least one entry before saving a profile.');
+        return;
     }
 
-    return result.sort((a, b) => {
-        const statusA = getEntryStatusPriority(a, state.settings);
-        const statusB = getEntryStatusPriority(b, state.settings);
-        if (statusA !== statusB) return statusA - statusB;
+    const nameInput = template.find('#lbgProfileName');
+    const name = String(nameInput.val() || '').trim() || window.prompt('Profile name:', '') || '';
+    if (!String(name).trim()) return;
 
-        const favoriteA = isFavorite(state.settings, a) ? 0 : 1;
-        const favoriteB = isFavorite(state.settings, b) ? 0 : 1;
-        return favoriteA - favoriteB;
-    });
+    const profile = createProfileFromEntries(name, getAllEntries(state));
+    state.profiles = upsertProfile(profile);
+    nameInput.val('');
+    renderProfiles(template, state);
+    toastr.success(`Lorebook Gatekeeper: profile "${profile.name}" saved.`);
+}
+
+function renderProfiles(template, state) {
+    const container = template.find('#lbgProfilesList');
+    if (!container.length) return;
+
+    state.profiles = loadProfiles();
+    container.empty();
+
+    if (!state.profiles.length) {
+        container.append(createNoticeElement('No saved profiles yet. Save the current selection to create one.'));
+        return;
+    }
+
+    for (const profile of state.profiles) {
+        container.append(createProfileElement(profile, state));
+    }
+}
+
+function createProfileElement(profile, state) {
+    const card = document.createElement('div');
+    card.className = 'lbg-profile-card';
+
+    const currentIds = new Set(getAllEntries(state).map((entry) => entry.id));
+    const selectedIds = toStringArray(profile.selectedEntryIds);
+    const missingIds = selectedIds.filter((id) => !currentIds.has(id));
+
+    const header = document.createElement('div');
+    header.className = 'lbg-profile-card-header';
+
+    const title = document.createElement('strong');
+    title.textContent = profile.name;
+
+    const count = document.createElement('span');
+    count.className = 'lbg-profile-count';
+    count.textContent = `${selectedIds.length} entries${missingIds.length ? ` • ${missingIds.length} missing` : ''}`;
+
+    header.appendChild(title);
+    header.appendChild(count);
+
+    const meta = document.createElement('div');
+    meta.className = 'lbg-profile-meta';
+    meta.textContent = `Updated: ${formatProfileDate(profile.updatedAt)}`;
+
+    const preview = document.createElement('div');
+    preview.className = 'lbg-profile-preview';
+    preview.textContent = profile.entries?.length
+        ? profile.entries.slice(0, 8).map((entry) => `${entry.title}${entry.bookName ? ` — ${entry.bookName}` : ''}`).join('; ')
+        : 'Saved entry IDs only.';
+
+    const actions = document.createElement('div');
+    actions.className = 'lbg-profile-actions';
+
+    actions.appendChild(createProfileActionButton('Apply profile', 'apply', profile.id));
+    actions.appendChild(createProfileActionButton('Replace with current', 'replace', profile.id));
+    actions.appendChild(createProfileActionButton('Delete', 'delete', profile.id, 'lbg-profile-danger'));
+
+    if (missingIds.length) {
+        const missing = document.createElement('details');
+        missing.className = 'lbg-profile-missing';
+        const summary = document.createElement('summary');
+        summary.textContent = 'Missing entries';
+        const list = document.createElement('div');
+        list.textContent = missingIds.join(', ');
+        missing.appendChild(summary);
+        missing.appendChild(list);
+        card.appendChild(header);
+        card.appendChild(meta);
+        card.appendChild(preview);
+        card.appendChild(missing);
+        card.appendChild(actions);
+        return card;
+    }
+
+    card.appendChild(header);
+    card.appendChild(meta);
+    card.appendChild(preview);
+    card.appendChild(actions);
+    return card;
+}
+
+function createProfileActionButton(text, action, profileId, extraClass = '') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `menu_button lbg-profile-action ${extraClass}`.trim();
+    button.textContent = text;
+    button.setAttribute('data-lbg-profile-action', action);
+    button.setAttribute('data-lbg-profile-id', profileId);
+    return button;
+}
+
+function applyProfileToState(profile, state) {
+    const selectedIds = new Set(toStringArray(profile.selectedEntryIds));
+
+    for (const entry of getAllEntries(state)) {
+        entry.selected = selectedIds.has(entry.id);
+        if (entry.selected) entry.selectionSource = 'profile';
+        else if (entry.selectionSource === 'profile') delete entry.selectionSource;
+    }
+
+    enforceEntryRules(state);
+}
+
+function updatePromptPreview(template, state) {
+    const output = template.find('#lbgPromptPreviewOutput');
+    const info = template.find('#lbgPromptPreviewInfo');
+
+    if (!state.promptPreview) {
+        info.text('Prompt preview is unavailable for this generation event.');
+        output.text('');
+        return;
+    }
+
+    const variant = state.promptPreviewVariant || 'before';
+    const format = state.promptPreviewFormat || 'pretty';
+
+    const value = variant === 'after' ? buildAfterPromptValue(state) : clonePromptValue(state.promptPreview.payload);
+    const text = formatPromptValue(value, state.promptPreview.type, format);
+    const line = state.promptPreview.type === 'chat'
+        ? `${state.promptPreview.label || 'Chat payload'} • ${Array.isArray(value) ? value.length : 0} messages • ${variant}`
+        : `${state.promptPreview.label || 'Text prompt'} • ${text.length} characters • ${variant}`;
+
+    info.text(line);
+    output.text(text);
+}
+
+function buildAfterPromptValue(state) {
+    const result = buildConfirmedResult(state);
+
+    if (state.promptPreview?.type === 'chat') {
+        const chat = clonePromptValue(state.promptPreview.payload);
+        if (!Array.isArray(chat)) return chat;
+        removeEntriesFromChat(chat, result.disabledEntries);
+        replaceEditedEntriesInChat(chat, result.selectedActiveEntries);
+        injectManualEntriesIntoChat(chat, result.manualEntries);
+        return chat;
+    }
+
+    if (state.promptPreview?.type === 'text') {
+        let prompt = String(state.promptPreview.payload || '');
+        prompt = removeEntriesFromTextPrompt(prompt, result.disabledEntries);
+        prompt = replaceEditedEntriesInTextPrompt(prompt, result.selectedActiveEntries);
+        prompt = injectManualEntriesIntoTextPrompt(prompt, result.manualEntries);
+        return prompt;
+    }
+
+    return clonePromptValue(state.promptPreview?.payload);
+}
+
+function formatPromptValue(value, type, format) {
+    if (type === 'chat') {
+        try {
+            return JSON.stringify(value, null, format === 'pretty' ? 2 : 0);
+        } catch (_) {
+            return String(value || '');
+        }
+    }
+
+    if (typeof value === 'string') return value;
+
+    try {
+        return JSON.stringify(value, null, format === 'pretty' ? 2 : 0);
+    } catch (_) {
+        return String(value || '');
+    }
+}
+
+function clonePromptValue(value) {
+    try {
+        if (typeof structuredClone === 'function') return structuredClone(value);
+    } catch (_) {
+        // Fallback below.
+    }
+
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (_) {
+        return value;
+    }
+}
+
+function getAllEntries(state) {
+    return [...state.activeEntries, ...state.inactiveEntries];
 }
 
 function buildKeysText(entry) {
-    const keys = [...(entry.keys || []), ...(entry.secondaryKeys || [])].filter(Boolean);
-    return keys.length ? `Keys: ${keys.join(', ')}` : 'Keys: none';
-}
-
-function shorten(text, limit) {
-    const value = String(text || '');
-    return value.length <= limit ? value : `${value.slice(0, limit)}...`;
+    const primary = toStringArray(entry.keys);
+    const secondary = toStringArray(entry.keysecondary);
+    const parts = [];
+    if (primary.length) parts.push(`Keys: ${primary.join(', ')}`);
+    if (secondary.length) parts.push(`Secondary: ${secondary.join(', ')}`);
+    return parts.join(' • ') || 'No keys listed.';
 }
 
 function getSourcePriority(sourceType) {
     switch (sourceType) {
         case 'chat': return 0;
-        case 'persona': return 1;
-        case 'character': return 2;
+        case 'character': return 1;
+        case 'persona': return 2;
         case 'global': return 3;
-        default: return 4;
+        default: return 10;
     }
 }
 
 function getSourceLabel(sourceType) {
     switch (sourceType) {
         case 'chat': return 'chat-linked';
-        case 'persona': return 'persona-linked';
         case 'character': return 'character-linked';
+        case 'persona': return 'persona-linked';
         case 'global': return 'global';
-        default: return 'external';
+        case 'manual': return 'manual';
+        default: return sourceType || 'other';
     }
 }
 
+function createNoticeElement(text) {
+    const notice = document.createElement('div');
+    notice.className = 'lbg-notice';
+    notice.textContent = text;
+    return notice;
+}
+
+function shorten(text, maxLength) {
+    const value = String(text || '');
+    if (value.length <= maxLength) return value;
+    return `${value.slice(0, maxLength)}…`;
+}
+
 function persistState(state) {
-    ensureEntryMetaSettings(state.settings);
     saveSettings(state.settings);
 }
 
+function formatProfileDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'unknown';
+    return date.toLocaleString();
+}
+
+function escapeSelectorValue(value) {
+    if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/["\\]/g, '\\$&');
+}
+
 function toStringArray(value) {
-    return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+    if (!Array.isArray(value)) return [];
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
 }

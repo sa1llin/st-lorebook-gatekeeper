@@ -4,7 +4,6 @@
             <h3>Lorebook Gatekeeper</h3>
             <div class="lbg-subtitle">Review activated Lorebook / World Info entries before sending the prompt.</div>
         </div>
-
         <div class="lbg-stats">
             <div>Activated entries: <strong id="lbgActiveCount">0</strong></div>
             <div>Inactive entries: <strong id="lbgInactiveCount">0</strong></div>
@@ -15,109 +14,143 @@
         </div>
     </div>
 
-    <div class="lbg-toolbar">
-        <input id="lbgSearch" class="text_pole" type="search" placeholder="Search entries, lorebooks, keys, content, tags..." />
-        <select id="lbgSort" class="text_pole">
-            <option value="tokens_desc">Tokens: high to low</option>
-            <option value="tokens_asc">Tokens: low to high</option>
-            <option value="book">Book name</option>
-            <option value="title">Entry title</option>
-        </select>
-        <select id="lbgViewMode" class="text_pole lbg-view-mode-select" title="Card view mode">
-            <option value="detailed">Detailed View</option>
-            <option value="compact">Compact View</option>
-        </select>
+    <div class="lbg-tabs" role="tablist" aria-label="Lorebook Gatekeeper tabs">
+        <button type="button" class="menu_button lbg-tab-button is-active" data-lbg-tab="entries">Entries</button>
+        <button type="button" class="menu_button lbg-tab-button" data-lbg-tab="profiles">Profiles</button>
+        <button type="button" class="menu_button lbg-tab-button" data-lbg-tab="prompt">Prompt Preview</button>
     </div>
 
-    <div class="lbg-tag-filter-panel">
-        <div class="lbg-filter-header">
-            <div class="lbg-filter-title">
-                <strong>Tags</strong>
-                <span id="lbgSelectedTagCount" class="lbg-muted">0 selected</span>
-            </div>
-            <div class="lbg-filter-actions">
-                <select id="lbgTagFilterMode" class="text_pole lbg-compact-select" title="Tag filter mode">
-                    <option value="or">OR</option>
-                    <option value="and">AND</option>
-                </select>
-                <button id="lbgClearTagFilter" type="button" class="menu_button lbg-small-button">Clear</button>
-                <button id="lbgOpenTagManager" type="button" class="menu_button lbg-small-button">Manage</button>
-            </div>
-        </div>
-        <div id="lbgTagFilterList" class="lbg-tag-filter-list"></div>
-
-        <details id="lbgTagManager" class="lbg-tag-manager-panel">
-            <summary>Tag manager</summary>
-            <div class="lbg-tag-manager-hint">Delete custom tags completely or clear standard tags from all entries.</div>
-            <div id="lbgTagManagerList" class="lbg-tag-manager-list"></div>
-        </details>
-    </div>
-
-    <div class="lbg-actions">
-        <label class="lbg-inline-check">
-            <input id="lbgShowInactive" type="checkbox" />
-            <span>Show inactive entries for manual selection</span>
-        </label>
-
-        <div class="lbg-action-buttons">
-            <button id="lbgEnableAllActive" type="button" class="menu_button">Enable all active</button>
-            <button id="lbgDisableAllActive" type="button" class="menu_button">Deselect all active</button>
-        </div>
-    </div>
-
-    <div class="lbg-memory-panel">
-        <label class="lbg-inline-check">
-            <input id="lbgRememberChoice" type="checkbox" />
-            <span>Remember my choice after confirmation</span>
-        </label>
-
-        <div class="lbg-memory-actions">
-            <button id="lbgApplyRememberedChoice" type="button" class="menu_button">Apply remembered choice</button>
-            <button id="lbgCompareRememberedChoice" type="button" class="menu_button">Compare with remembered</button>
-            <button id="lbgApplyPreviousChoice" type="button" class="menu_button">Apply previous request choice</button>
-            <button id="lbgClearRememberedChoice" type="button" class="menu_button">Clear remembered choice</button>
-        </div>
-
-        <div id="lbgRememberedChoiceInfo" class="lbg-memory-info">No remembered choice.</div>
-        <div id="lbgRememberedCompareInfo" class="lbg-compare-info" hidden></div>
-        <div id="lbgPreviousChoiceInfo" class="lbg-memory-info">No previous request choice.</div>
-    </div>
-
-    <div class="lbg-section-header">
-        <h4>Activated entries</h4>
-        <span><strong id="lbgActiveVisibleCount">0</strong> visible</span>
-    </div>
-
-    <div id="lbgActiveEntries" class="lbg-list"></div>
-
-    <div id="lbgInactiveSection">
-        <div class="lbg-section-header">
-            <h4>Inactive entries</h4>
-            <span><strong id="lbgInactiveVisibleCount">0</strong> visible</span>
-        </div>
-
-        <div class="lbg-book-filter-row">
-            <label for="lbgInactiveBookFilter">Show inactive entries from lorebook:</label>
-            <select id="lbgInactiveBookFilter" class="text_pole">
-                <option value="__all__">All lorebooks</option>
+    <section class="lbg-tab-panel is-active" data-lbg-panel="entries">
+        <div class="lbg-toolbar">
+            <input id="lbgSearch" class="text_pole" type="search" placeholder="Search by title, content, key, book or tag..." />
+            <select id="lbgSort" class="text_pole">
+                <option value="tokens_desc">Tokens: high to low</option>
+                <option value="tokens_asc">Tokens: low to high</option>
+                <option value="book">Book name</option>
+                <option value="title">Entry title</option>
+            </select>
+            <select id="lbgViewMode" class="text_pole">
+                <option value="detailed">Detailed View</option>
+                <option value="compact">Compact View</option>
             </select>
         </div>
 
-        <div class="lbg-priority-panel">
-            <div class="lbg-priority-header">
-                <div>
-                    <strong>Prioritize inactive lorebooks</strong>
-                    <div class="lbg-priority-hint">Selected lorebooks stay visible together with all others, but their inactive entries are shown first.</div>
+        <div class="lbg-tag-filter-panel">
+            <div class="lbg-filter-header">
+                <strong>Tags <span id="lbgSelectedTagCount">0 selected</span></strong>
+                <div class="lbg-filter-actions">
+                    <select id="lbgTagFilterMode" class="text_pole">
+                        <option value="or">OR</option>
+                        <option value="and">AND</option>
+                    </select>
+                    <button id="lbgClearTagFilter" type="button" class="menu_button">Clear</button>
+                    <button id="lbgOpenTagManager" type="button" class="menu_button">Manage</button>
                 </div>
-                <div class="lbg-priority-actions">
-                    <button id="lbgUseLinkedBooksFirst" type="button" class="menu_button">Use linked/global first</button>
-                    <button id="lbgClearPreferredBooks" type="button" class="menu_button">Clear priority</button>
+            </div>
+            <div id="lbgTagFilterList" class="lbg-tag-filter-list"></div>
+            <details id="lbgTagManager" class="lbg-tag-manager">
+                <summary>Tag manager</summary>
+                <div class="lbg-priority-hint">Delete custom tags completely or clear standard tags from all entries.</div>
+                <div id="lbgTagManagerList" class="lbg-tag-manager-list"></div>
+            </details>
+        </div>
+
+        <div class="lbg-actions">
+            <label class="lbg-inline-check">
+                <input id="lbgShowInactive" type="checkbox" />
+                <span>Show inactive entries for manual selection</span>
+            </label>
+            <div class="lbg-action-buttons">
+                <button id="lbgEnableAllActive" type="button" class="menu_button">Enable all active</button>
+                <button id="lbgDisableAllActive" type="button" class="menu_button">Deselect all active</button>
+            </div>
+        </div>
+
+        <div class="lbg-memory-panel">
+            <label class="lbg-inline-check">
+                <input id="lbgRememberChoice" type="checkbox" />
+                <span>Remember my choice after confirmation</span>
+            </label>
+            <div class="lbg-memory-actions">
+                <button id="lbgApplyRememberedChoice" type="button" class="menu_button">Apply remembered choice</button>
+                <button id="lbgCompareRememberedChoice" type="button" class="menu_button">Compare with remembered</button>
+                <button id="lbgApplyPreviousChoice" type="button" class="menu_button">Apply previous request choice</button>
+                <button id="lbgClearRememberedChoice" type="button" class="menu_button">Clear remembered choice</button>
+            </div>
+            <div id="lbgRememberedChoiceInfo" class="lbg-memory-info">No remembered choice.</div>
+            <div id="lbgPreviousChoiceInfo" class="lbg-memory-info">No previous choice.</div>
+            <div id="lbgRememberedCompareInfo" class="lbg-memory-info" hidden></div>
+        </div>
+
+        <div class="lbg-section-header">
+            <h4>Activated entries</h4>
+            <span><span id="lbgActiveVisibleCount">0</span> visible</span>
+        </div>
+        <div id="lbgActiveEntries" class="lbg-list"></div>
+
+        <div id="lbgInactiveSection" class="lbg-inactive-section">
+            <div class="lbg-section-header">
+                <h4>Inactive entries</h4>
+                <span><span id="lbgInactiveVisibleCount">0</span> visible</span>
+            </div>
+
+            <div class="lbg-book-filter-row">
+                <label for="lbgInactiveBookFilter">Show inactive entries from lorebook:</label>
+                <select id="lbgInactiveBookFilter" class="text_pole">
+                    <option value="__all__">All lorebooks</option>
+                </select>
+            </div>
+
+            <div class="lbg-priority-panel">
+                <div class="lbg-priority-header">
+                    <strong>Prioritize inactive lorebooks</strong>
+                    <div class="lbg-priority-actions">
+                        <button id="lbgUseLinkedBooksFirst" type="button" class="menu_button">Use linked/global first</button>
+                        <button id="lbgClearPreferredBooks" type="button" class="menu_button">Clear priority</button>
+                    </div>
+                </div>
+                <div class="lbg-priority-hint">Selected lorebooks stay visible together with all others, but their inactive entries are shown first.</div>
+                <div id="lbgPreferredInactiveBooks" class="lbg-book-choice-list"></div>
+            </div>
+
+            <div id="lbgInactiveEntries" class="lbg-list"></div>
+        </div>
+    </section>
+
+    <section class="lbg-tab-panel" data-lbg-panel="profiles">
+        <div class="lbg-profile-panel">
+            <div class="lbg-profile-header">
+                <div>
+                    <h4>Saved profiles</h4>
+                    <div class="lbg-profile-hint">Profiles store only selected entry IDs. They do not copy or modify Lorebook content.</div>
                 </div>
             </div>
 
-            <div id="lbgPreferredInactiveBooks" class="lbg-book-choice-list"></div>
-        </div>
+            <div class="lbg-profile-save-row">
+                <input id="lbgProfileName" class="text_pole" type="text" placeholder="Profile name, e.g. Scene: Palace" maxlength="80" />
+                <button id="lbgSaveProfile" type="button" class="menu_button">Save current selection as profile</button>
+            </div>
 
-        <div id="lbgInactiveEntries" class="lbg-list"></div>
-    </div>
+            <div id="lbgProfilesList" class="lbg-profiles-list"></div>
+        </div>
+    </section>
+
+    <section class="lbg-tab-panel" data-lbg-panel="prompt">
+        <div class="lbg-prompt-panel">
+            <div class="lbg-prompt-toolbar">
+                <select id="lbgPromptPreviewVariant" class="text_pole">
+                    <option value="before">Before Gatekeeper changes</option>
+                    <option value="after">After current selection</option>
+                </select>
+                <select id="lbgPromptPreviewFormat" class="text_pole">
+                    <option value="pretty">Pretty JSON / readable</option>
+                    <option value="raw">Raw</option>
+                </select>
+                <button id="lbgRefreshPromptPreview" type="button" class="menu_button">Refresh</button>
+                <button id="lbgCopyPromptPreview" type="button" class="menu_button">Copy</button>
+            </div>
+            <div id="lbgPromptPreviewInfo" class="lbg-prompt-info"></div>
+            <pre id="lbgPromptPreviewOutput" class="lbg-prompt-preview"></pre>
+        </div>
+    </section>
 </div>

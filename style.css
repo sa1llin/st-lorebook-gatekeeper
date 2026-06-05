@@ -1227,3 +1227,174 @@ body.lbg-edit-open {
         font-size: 0.84em;
     }
 }
+
+/* v0.1.14 Profiles + Prompt Preview tabs */
+.lbg-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    border-bottom: 1px solid #343434;
+    padding-bottom: 8px;
+}
+
+.lbg-tab-button {
+    border-radius: 999px !important;
+    padding: 6px 14px !important;
+    opacity: 0.85;
+}
+
+.lbg-tab-button.is-active {
+    opacity: 1;
+    border-color: #dcddd8 !important;
+    box-shadow: 0 0 0 1px rgba(220, 221, 216, 0.2) inset;
+}
+
+.lbg-tab-panel {
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.lbg-tab-panel.is-active {
+    display: flex;
+}
+
+.lbg-profile-panel,
+.lbg-prompt-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border: 1px solid #343434;
+    border-radius: 8px;
+    padding: 12px;
+    background: #101010 !important;
+    color: #dcddd8 !important;
+}
+
+.lbg-profile-header,
+.lbg-profile-card-header,
+.lbg-prompt-toolbar,
+.lbg-profile-save-row,
+.lbg-profile-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.lbg-profile-header,
+.lbg-profile-card-header {
+    justify-content: space-between;
+}
+
+.lbg-profile-hint,
+.lbg-profile-meta,
+.lbg-profile-preview,
+.lbg-prompt-info,
+.lbg-profile-count {
+    opacity: 0.82;
+    font-size: 0.88em;
+}
+
+.lbg-profile-save-row input {
+    flex: 1;
+    min-width: 240px;
+}
+
+.lbg-profiles-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 520px;
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.lbg-profile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid #343434;
+    border-radius: 8px;
+    padding: 10px;
+    background: #171717 !important;
+}
+
+.lbg-profile-preview {
+    overflow-wrap: anywhere;
+}
+
+.lbg-profile-danger {
+    border-color: rgba(255, 110, 110, 0.65) !important;
+}
+
+.lbg-profile-missing {
+    border: 1px dashed #343434;
+    border-radius: 6px;
+    padding: 6px 8px;
+    opacity: 0.9;
+}
+
+.lbg-prompt-toolbar select {
+    min-width: 210px;
+}
+
+.lbg-prompt-preview {
+    min-height: 360px;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid #343434;
+    border-radius: 8px;
+    padding: 12px;
+    background: #171717 !important;
+    color: #dcddd8 !important;
+    font-family: var(--monoFontFamily, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.lbg-status-badge,
+.lbg-lock-badge,
+.lbg-block-badge,
+.lbg-edit-badge {
+    border: 1px solid #343434;
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+.lbg-lock-badge {
+    border-color: rgba(98, 180, 255, 0.65) !important;
+}
+
+.lbg-block-badge {
+    border-color: rgba(255, 110, 110, 0.65) !important;
+}
+
+.lbg-edit-badge {
+    border-color: rgba(243, 201, 105, 0.65) !important;
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+    .lbg-tabs,
+    .lbg-profile-save-row,
+    .lbg-profile-actions,
+    .lbg-prompt-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .lbg-tab-button,
+    .lbg-profile-save-row input,
+    .lbg-prompt-toolbar select {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .lbg-prompt-preview {
+        min-height: 45vh;
+        max-height: none;
+    }
+}
