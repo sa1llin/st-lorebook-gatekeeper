@@ -61,7 +61,10 @@ body.lbg-edit-open {
 
 .lbg-root *,
 .lbg-mobile-panel *,
-.lbg-desktop-panel * {
+.lbg-desktop-panel *,
+.lbg-edit-overlay *,
+.lbg-edit-overlay *::before,
+.lbg-edit-overlay *::after {
     box-sizing: border-box;
 }
 
@@ -642,9 +645,12 @@ body.lbg-edit-open {
 }
 
 .lbg-keys {
-    margin-top: 8px;
-    color: rgba(220, 221, 216, 0.78);
+    margin-top: 7px;
+    color: rgba(220, 221, 216, 0.58);
     overflow-wrap: anywhere;
+    font-size: 0.66rem !important;
+    line-height: 1.25;
+    font-weight: 400 !important;
 }
 
 .lbg-preview,
@@ -823,26 +829,30 @@ body.lbg-edit-open {
 .lbg-edit-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000001;
+    z-index: 2147483000;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: center;
-    padding: 16px;
-    background: rgba(0, 0, 0, 0.70);
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: rgba(0, 0, 0, 0.74);
+    pointer-events: auto !important;
 }
 
 .lbg-edit-modal {
-    width: min(920px, 100%);
+    position: relative;
+    width: min(940px, calc(100vw - 32px));
+    height: min(62dvh, 720px);
     min-height: 50dvh;
-    max-height: 86dvh;
+    max-height: calc(100dvh - 32px);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid #343434;
+    border: 1px solid #3a3a3a;
     border-radius: 16px;
     background: #171717 !important;
     color: #dcddd8 !important;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.58);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.68);
+    pointer-events: auto !important;
 }
 
 .lbg-edit-header,
@@ -853,34 +863,65 @@ body.lbg-edit-open {
     gap: 10px;
     padding: 12px;
     border-bottom: 1px solid #303030;
-    background: #101010;
+    background: #101010 !important;
+    flex: 0 0 auto;
+}
+
+.lbg-edit-title {
+    max-width: calc(100% - 48px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    font-weight: 700 !important;
 }
 
 .lbg-edit-footer {
+    justify-content: flex-end;
+    flex-wrap: wrap;
     border-top: 1px solid #303030;
     border-bottom: 0;
 }
 
 .lbg-edit-close {
     width: 34px !important;
+    min-width: 34px !important;
     height: 34px !important;
+    min-height: 34px !important;
     padding: 0 !important;
     border-radius: 999px !important;
+    font-size: 1.1rem !important;
+    line-height: 1 !important;
+}
+
+.lbg-edit-action {
+    width: auto !important;
+    min-height: 36px !important;
+    padding: 7px 12px !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
 }
 
 .lbg-edit-textarea {
-    flex: 1;
-    min-height: 360px;
-    resize: vertical;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100% !important;
+    resize: none;
     border: 0 !important;
     border-radius: 0 !important;
+    outline: none !important;
+    padding: 14px !important;
     background: #101010 !important;
+    color: #dcddd8 !important;
     font-family: var(--monoFontFamily, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+    font-size: 0.78rem !important;
     line-height: 1.45;
+    overflow: auto !important;
 }
 
 /* Typography balance: compact default text, bold only for meaningful anchors. */
 .lbg-entry-title,
+.lbg-edit-title,
 .lbg-section-header h4,
 .lbg-title-block h3,
 .lbg-scenario-card h4,
@@ -959,5 +1000,24 @@ body.lbg-edit-open {
     .lbg-prompt-preview {
         min-height: 300px;
         max-height: calc(100dvh - 310px);
+    }
+
+    .lbg-edit-overlay {
+        padding: 10px;
+    }
+
+    .lbg-edit-modal {
+        width: calc(100vw - 20px);
+        height: min(68dvh, calc(100dvh - 20px));
+        min-height: 50dvh;
+    }
+
+    .lbg-edit-footer {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .lbg-edit-action {
+        width: 100% !important;
     }
 }

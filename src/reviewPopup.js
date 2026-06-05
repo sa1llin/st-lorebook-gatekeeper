@@ -1046,21 +1046,25 @@ function createStaticTagChip(tagName, settings) {
 }
 
 async function openEditModal(entry, state) {
+    document.querySelectorAll('.lbg-edit-overlay').forEach((node) => node.remove());
+
     const overlay = el('div', 'lbg-edit-overlay');
     const modal = el('div', 'lbg-edit-modal');
     const header = el('div', 'lbg-edit-header');
-    const title = el('strong');
+    const title = el('strong', 'lbg-edit-title');
     title.textContent = `Edit for this prompt: ${entry.title || 'Untitled entry'}`;
     const close = button('×', 'lbg-edit-close');
+    close.setAttribute('aria-label', 'Close editor');
     header.append(title, close);
 
-    const textarea = el('textarea', 'text_pole lbg-edit-textarea');
+    const textarea = el('textarea', 'lbg-edit-textarea');
     textarea.value = getEntryPromptContent(entry);
 
     const footer = el('div', 'lbg-edit-footer');
-    const reset = button('Reset to original', 'lbg-footer-secondary');
-    const apply = button('Apply temporary edit', 'lbg-footer-primary');
-    footer.append(reset, apply);
+    const reset = button('Reset to original', 'lbg-edit-action lbg-footer-secondary');
+    const discard = button('Close without applying', 'lbg-edit-action lbg-footer-secondary');
+    const apply = button('Apply temporary edit', 'lbg-edit-action lbg-footer-primary');
+    footer.append(reset, discard, apply);
 
     modal.append(header, textarea, footer);
     overlay.appendChild(modal);
@@ -1069,10 +1073,22 @@ async function openEditModal(entry, state) {
 
     const cleanup = () => {
         document.body.classList.remove('lbg-edit-open');
+        document.removeEventListener('keydown', onKeyDown, true);
         overlay.remove();
     };
 
-    close.addEventListener('click', cleanup, { once: true });
+    const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cleanup();
+        }
+    };
+
+    modal.addEventListener('click', (event) => event.stopPropagation());
+    overlay.addEventListener('click', cleanup);
+    document.addEventListener('keydown', onKeyDown, true);
+    close.addEventListener('click', cleanup);
+    discard.addEventListener('click', cleanup);
     reset.addEventListener('click', () => {
         clearTemporaryEdit(entry);
         entry.tokens = countEntryTokensFallback(entry);
@@ -1087,6 +1103,8 @@ async function openEditModal(entry, state) {
         cleanup();
         renderRoot(state);
     });
+
+    requestAnimationFrame(() => textarea.focus());
 }
 
 function countEntryTokensFallback(entry) {
