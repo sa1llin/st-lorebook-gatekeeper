@@ -1,11 +1,4 @@
 import { eventSource, event_types, main_api, stopGeneration } from '../../../../script.js';
-import { getContext } from '../../../extensions.js';
-import {
-    world_info_case_sensitive,
-    world_info_depth,
-    world_info_include_names,
-    world_info_match_whole_words,
-} from '../../../world-info.js';
 import { findActiveEntries, splitActiveAndInactive } from './src/activationMatcher.js';
 import { collectWorldInfoEntries } from './src/worldInfoCollector.js';
 import { addTokenCounts, buildTokenStats } from './src/tokenCounter.js';
@@ -40,13 +33,6 @@ function validateRequiredEvents() {
 }
 
 function addLaunchButton() {
-    const extensionsMenu = document.getElementById('prompt_inspector_wand_container') ?? document.getElementById('extensionsMenu');
-
-    if (!extensionsMenu) {
-        console.warn(`${MODULE_NAME}: extensions menu was not found. Toggle buttons were not added.`);
-        return;
-    }
-
     const launchButton = document.createElement('div');
     launchButton.id = 'lorebookGatekeeperButton';
     launchButton.classList.add('list-group-item', 'flex-container', 'flexGap5', 'interactable');
@@ -64,6 +50,14 @@ function addLaunchButton() {
     updateButtonView();
     launchButton.appendChild(icon);
     launchButton.appendChild(textSpan);
+
+    const extensionsMenu = document.getElementById('prompt_inspector_wand_container') ?? document.getElementById('extensionsMenu');
+
+    if (!extensionsMenu) {
+        console.warn(`${MODULE_NAME}: extensions menu was not found. Toggle button was not added.`);
+        return;
+    }
+
     extensionsMenu.appendChild(launchButton);
 
     launchButton.addEventListener('click', () => {
@@ -71,42 +65,6 @@ function addLaunchButton() {
         saveSettings(settings);
         updateButtonView();
         toastr.info(`${MODULE_NAME} ${settings.enabled ? 'enabled' : 'disabled'}.`);
-    });
-
-    const triggerButton = document.createElement('div');
-    triggerButton.id = 'lorebookGatekeeperTriggerWordButton';
-    triggerButton.classList.add('list-group-item', 'flex-container', 'flexGap5', 'interactable');
-    triggerButton.tabIndex = 0;
-    triggerButton.title = 'Toggle trigger word recognition diagnostics';
-
-    const triggerIcon = document.createElement('i');
-    const triggerText = document.createElement('span');
-
-    function updateTriggerButtonView() {
-        const enabled = Boolean(settings.triggerWordDetectionEnabled);
-        triggerIcon.className = enabled ? 'fa-solid fa-key' : 'fa-solid fa-keyboard';
-        triggerText.textContent = enabled ? 'Trigger word recognition: ON' : 'Trigger word recognition: OFF';
-    }
-
-    updateTriggerButtonView();
-    triggerButton.appendChild(triggerIcon);
-    triggerButton.appendChild(triggerText);
-    extensionsMenu.appendChild(triggerButton);
-
-    triggerButton.addEventListener('click', () => {
-        settings.triggerWordDetectionEnabled = !Boolean(settings.triggerWordDetectionEnabled);
-        saveSettings(settings);
-        updateTriggerButtonView();
-
-        if (settings.triggerWordDetectionEnabled) {
-            toastr.warning(
-                'Trigger word recognition is experimental and may be inaccurate. SillyTavern does not expose the exact internal matched keyword to third-party extensions.',
-                `${MODULE_NAME}: warning`,
-                { timeOut: 9000, extendedTimeOut: 9000 },
-            );
-        } else {
-            toastr.info(`${MODULE_NAME}: trigger word recognition disabled.`);
-        }
     });
 }
 
@@ -116,17 +74,7 @@ function isLikelyChatCompletionMode() {
 
 async function reviewPrompt(promptText, options = {}) {
     const allEntries = await collectWorldInfoEntries();
-    const activeEntries = findActiveEntries(allEntries, promptText, {
-        enableTriggerWordDetection: Boolean(settings.triggerWordDetectionEnabled),
-        triggerScanText: options.triggerScanText,
-        triggerScanTexts: options.triggerScanTexts,
-        triggerScanMessages: options.triggerScanMessages,
-        triggerScanMessageSources: options.triggerScanMessageSources,
-        defaultScanDepth: options.defaultScanDepth,
-        includeNames: options.includeNames,
-        caseSensitive: options.caseSensitive,
-        matchWholeWords: options.matchWholeWords,
-    });
+    const activeEntries = findActiveEntries(allEntries, promptText);
     const { inactiveEntries } = splitActiveAndInactive(allEntries, activeEntries);
     const hasLockedEntries = allEntries.some((entry) => isLocked(settings, entry));
 
@@ -156,339 +104,12 @@ async function handleReviewResult(result, applyChanges) {
     if (result.action === 'confirm') await applyChanges(result);
 }
 
-function buildTriggerScanOptions(fallbackChat = []) {
-    const triggerScanMessageSources = getTriggerScanMessageSources(fallbackChat);
-    const defaultScanDepth = getWorldInfoScanDepth();
-    const includeNames = getWorldInfoIncludeNames();
-    const caseSensitive = getWorldInfoCaseSensitive();
-    const matchWholeWords = getWorldInfoMatchWholeWords();
-
-    const triggerScanTexts = triggerScanMessageSources
-        .map((source) => ({
-            label: source.label,
-            text: buildTriggerScanTextFromMessages(source.messages, defaultScanDepth, includeNames),
-        }))
-        .filter((source) => source.text);
-
-    const primaryScanText = triggerScanTexts[0]?.text || '';
-
-    console.debug(`${MODULE_NAME}: trigger scan prepared.`, {
-        sources: triggerScanMessageSources.map((source) => ({
-            label: source.label,
-            messages: source.messages.length,
-        })),
-        defaultScanDepth,
-        includeNames,
-        caseSensitive,
-        matchWholeWords,
-        triggerScanTextLength: primaryScanText.length,
-        triggerScanSourceCount: triggerScanTexts.length,
-    });
-
-    return {
-        triggerScanText: primaryScanText,
-        triggerScanTexts,
-        triggerScanMessages: triggerScanMessageSources[0]?.messages || [],
-        triggerScanMessageSources,
-        defaultScanDepth,
-        includeNames,
-        caseSensitive,
-        matchWholeWords,
-    };
-}
-
-function getTriggerScanMessageSources(fallbackChat = []) {
-    const context = getSafeContext();
-    const sources = [
-        { label: 'context.chat', value: context?.chat },
-        { label: 'globalThis.chat', value: globalThis.chat },
-        { label: 'event.chat', value: fallbackChat },
-    ];
-
-    const result = [];
-    const seen = new Set();
-
-    for (const source of sources) {
-        if (!Array.isArray(source.value) || !source.value.length) continue;
-
-        const messages = normalizeTriggerMessages(source.value);
-        if (!messages.length) continue;
-
-        const signature = messages
-            .map((message) => `${message.name || ''}:${message.role || ''}:${message.content || ''}`)
-            .join('\n---\n');
-
-        if (seen.has(signature)) continue;
-        seen.add(signature);
-
-        result.push({ label: source.label, messages });
-    }
-
-    return result;
-}
-
-function getTriggerScanMessages(fallbackChat = []) {
-    return getTriggerScanMessageSources(fallbackChat)[0]?.messages || [];
-}
-
-function normalizeTriggerMessages(messages) {
-    return messages
-        .filter((message) => isChatHistoryMessage(message))
-        .map((message) => ({
-            name: getMessageName(message),
-            content: extractMessageContent(message),
-            role: String(message?.role || '').toLowerCase(),
-        }))
-        .filter((message) => message.content);
-}
-
-function isChatHistoryMessage(message) {
-    if (typeof message === 'string') return Boolean(message.trim());
-
-    const role = String(message?.role || '').toLowerCase();
-
-    // Raw SillyTavern chat messages usually do not have a role field and use `mes`.
-    if (!role) return Boolean(extractMessageContent(message));
-
-    // If we only have the final Chat Completion prompt, ignore system/tool messages.
-    return role === 'user' || role === 'assistant';
-}
-
-function buildTriggerScanTextFromMessages(messages, scanDepth, includeNames = true) {
-    const depth = Number(scanDepth);
-    if (!Number.isFinite(depth) || depth <= 0 || !Array.isArray(messages) || !messages.length) return '';
-
-    return messages
-        .slice(-Math.floor(depth))
-        .map((message) => formatMessageForTriggerScan(message, includeNames))
-        .filter(Boolean)
-        .join('\n');
-}
-
-function formatMessageForTriggerScan(message, includeNames = true) {
-    const content = extractMessageContent(message);
-    if (!content) return '';
-
-    if (!includeNames) return content;
-
-    const name = getMessageName(message);
-    return name ? `${name}: ${content}` : content;
-}
-
-function getMessageName(message) {
-    if (typeof message === 'string' || !message) return '';
-
-    return String(
-        message.name
-        ?? message.sender
-        ?? message.extra?.name
-        ?? message.role
-        ?? '',
-    ).trim();
-}
-
-function extractMessageContent(message) {
-    if (!message) return '';
-
-    if (typeof message === 'string') return message;
-    if (typeof message.mes === 'string') return message.mes;
-    if (typeof message.message === 'string') return message.message;
-    if (typeof message.content === 'string') return message.content;
-    if (typeof message.text === 'string') return message.text;
-
-    if (Array.isArray(message.content)) {
-        return message.content
-            .map((part) => {
-                if (typeof part === 'string') return part;
-                if (typeof part?.text === 'string') return part.text;
-                if (typeof part?.content === 'string') return part.content;
-                if (typeof part?.message === 'string') return part.message;
-                return '';
-            })
-            .filter(Boolean)
-            .join('\n');
-    }
-
-    return '';
-}
-
-function getWorldInfoScanDepth() {
-    const candidates = [];
-
-    // Prefer live UI/context values over the imported binding: in some SillyTavern builds
-    // the imported value can be stale during third-party extension execution.
-    candidates.push(
-        getNumericDomValue('#world_info_depth'),
-        getNumericDomValue('#world_info_depth_counter'),
-        getNumericDomValue('#wi_depth'),
-        getNumericDomValue('#world_info_scan_depth'),
-        getNumericDomValue('[name="world_info_depth"]'),
-    );
-
-    const context = getSafeContext();
-    candidates.push(
-        getNestedNumber(context, ['world_info_depth']),
-        getNestedNumber(context, ['worldInfoDepth']),
-        getNestedNumber(context, ['worldInfoSettings', 'depth']),
-        getNestedNumber(context, ['powerUserSettings', 'world_info_depth']),
-        getNestedNumber(context, ['extensionSettings', 'world_info_depth']),
-        getNestedNumber(globalThis, ['world_info_depth']),
-        getNestedNumber(globalThis, ['power_user', 'world_info_depth']),
-        getNestedNumber(globalThis, ['power_user', 'world_info', 'depth']),
-        getNestedNumber(globalThis, ['SillyTavern', 'settings', 'world_info_depth']),
-        Number(world_info_depth),
-    );
-
-    for (const candidate of candidates) {
-        const value = Number(candidate);
-        if (Number.isFinite(value) && value > 0) return Math.floor(value);
-    }
-
-    // This extension is only explaining keyword activation. If ST reports an unusable
-    // depth, keep diagnostics useful and avoid falling back to the whole prompt/history.
-    return 2;
-}
-
-function getWorldInfoIncludeNames() {
-    const candidates = [
-        getBooleanDomValue('#world_info_include_names'),
-        getNestedBoolean(getSafeContext(), ['world_info_include_names']),
-        getNestedBoolean(getSafeContext(), ['worldInfoSettings', 'includeNames']),
-        getNestedBoolean(globalThis, ['world_info_include_names']),
-        world_info_include_names,
-    ];
-
-    for (const candidate of candidates) {
-        const value = normalizeBoolean(candidate);
-        if (typeof value === 'boolean') return value;
-    }
-
-    return true;
-}
-
-function getWorldInfoCaseSensitive() {
-    const candidates = [
-        getBooleanDomValue('#world_info_case_sensitive'),
-        getNestedBoolean(getSafeContext(), ['world_info_case_sensitive']),
-        getNestedBoolean(getSafeContext(), ['worldInfoSettings', 'caseSensitive']),
-        getNestedBoolean(globalThis, ['world_info_case_sensitive']),
-        world_info_case_sensitive,
-    ];
-
-    for (const candidate of candidates) {
-        const value = normalizeBoolean(candidate);
-        if (typeof value === 'boolean') return value;
-    }
-
-    return false;
-}
-
-function getWorldInfoMatchWholeWords() {
-    const candidates = [
-        getBooleanDomValue('#world_info_match_whole_words'),
-        getNestedBoolean(getSafeContext(), ['world_info_match_whole_words']),
-        getNestedBoolean(getSafeContext(), ['worldInfoSettings', 'matchWholeWords']),
-        getNestedBoolean(globalThis, ['world_info_match_whole_words']),
-        world_info_match_whole_words,
-    ];
-
-    for (const candidate of candidates) {
-        const value = normalizeBoolean(candidate);
-        if (typeof value === 'boolean') return value;
-    }
-
-    return false;
-}
-
-function getSafeContext() {
-    try {
-        if (typeof getContext === 'function') return getContext();
-    } catch {
-        // fall through to global context fallback
-    }
-
-    try {
-        return globalThis.SillyTavern?.getContext?.() ?? null;
-    } catch {
-        return null;
-    }
-}
-
-function getBooleanDomValue(selector) {
-    try {
-        const element = document.querySelector(selector);
-        if (!element) return null;
-
-        if (typeof element.checked === 'boolean') return element.checked;
-
-        const value = element.value ?? element.textContent;
-        return normalizeBoolean(value);
-    } catch {
-        return null;
-    }
-}
-
-function getNestedBoolean(source, path) {
-    try {
-        let current = source;
-        for (const key of path) {
-            if (typeof current === 'function') current = current();
-            current = current?.[key];
-        }
-
-        return normalizeBoolean(current);
-    } catch {
-        return null;
-    }
-}
-
-function normalizeBoolean(value) {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') return value !== 0;
-    if (typeof value === 'string') {
-        const normalized = value.trim().toLowerCase();
-        if (['true', '1', 'yes', 'on', 'checked'].includes(normalized)) return true;
-        if (['false', '0', 'no', 'off', 'unchecked'].includes(normalized)) return false;
-    }
-
-    return null;
-}
-
-function getNumericDomValue(selector) {
-    try {
-        const element = document.querySelector(selector);
-        if (!element) return null;
-        const value = element.value ?? element.textContent;
-        const number = Number(value);
-        return Number.isFinite(number) ? number : null;
-    } catch {
-        return null;
-    }
-}
-
-function getNestedNumber(source, path) {
-    try {
-        let current = source;
-        for (const key of path) {
-            if (typeof current === 'function') current = current();
-            current = current?.[key];
-        }
-        const number = Number(current);
-        return Number.isFinite(number) ? number : null;
-    } catch {
-        return null;
-    }
-}
-
 eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, async (data) => {
     if (!settings.enabled || data.dryRun || !Array.isArray(data.chat)) return;
 
     try {
         const promptText = getPromptTextFromChat(data.chat);
-        const triggerScanOptions = settings.triggerWordDetectionEnabled
-            ? buildTriggerScanOptions(data.chat)
-            : {};
-        const result = await reviewPrompt(promptText, triggerScanOptions);
+        const result = await reviewPrompt(promptText);
 
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             removeEntriesFromChat(data.chat, disabledEntries);
@@ -519,10 +140,7 @@ eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, async (data) => {
     }
 
     try {
-        const triggerScanOptions = settings.triggerWordDetectionEnabled
-            ? buildTriggerScanOptions()
-            : {};
-        const result = await reviewPrompt(data.prompt, { ...triggerScanOptions, skipWhenNoActive: true });
+        const result = await reviewPrompt(data.prompt, { skipWhenNoActive: true });
 
         await handleReviewResult(result, async ({ disabledEntries, manualEntries, selectedActiveEntries }) => {
             data.prompt = removeEntriesFromTextPrompt(data.prompt, disabledEntries);
@@ -548,8 +166,33 @@ eventSource.on(event_types.GENERATE_AFTER_DATA, () => {
     scheduleItemizedPromptCorrectionFlush();
 });
 
+
+function injectTriggerReasonRollbackStyles() {
+    const styleId = 'lorebook-gatekeeper-trigger-reason-rollback-style';
+    if (document.getElementById(styleId)) return;
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+        .lbg-activation-reason,
+        .lbg-keyword-match {
+            display: none !important;
+        }
+
+        .lbg-keyword-highlight {
+            background: transparent !important;
+            color: inherit !important;
+            border: 0 !important;
+            padding: 0 !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 (function init() {
     validateRequiredEvents();
+    settings.triggerWordDetectionEnabled = false;
+    injectTriggerReasonRollbackStyles();
     addLaunchButton();
     console.log(`${MODULE_NAME}: initialized. main_api=${main_api}`);
 })();
