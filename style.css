@@ -1021,3 +1021,194 @@ body.lbg-edit-open {
         width: 100% !important;
     }
 }
+
+/* Compact UI adjustment: smaller text, denser entry cards, top-right entry actions, taller prompt editor. */
+.lbg-root,
+.lbg-upgraded-root {
+    font-size: 0.86rem;
+    line-height: 1.32;
+    gap: 10px;
+}
+
+.lbg-mobile-body,
+.lbg-desktop-body {
+    padding: 12px;
+}
+
+.lbg-toolbar,
+.lbg-search-panel,
+.lbg-actions,
+.lbg-memory-panel,
+.lbg-tag-filter-panel,
+.lbg-entry-section,
+.lbg-preview-tab,
+.lbg-scenarios-tab {
+    padding: 10px;
+}
+
+.lbg-list {
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.lbg-card-entry,
+.lbg-entry {
+    padding: 10px !important;
+    border-radius: 12px !important;
+}
+
+.lbg-entry-top {
+    position: relative;
+    display: block;
+    min-height: 30px;
+    padding-right: 132px;
+}
+
+.lbg-toggle-row {
+    max-width: 100%;
+    gap: 7px;
+    align-items: center;
+}
+
+.lbg-entry-title {
+    font-size: 0.84rem;
+    line-height: 1.18;
+}
+
+.lbg-entry-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 28px);
+    gap: 5px;
+    align-items: center;
+    justify-content: end;
+}
+
+.lbg-icon-button {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    font-size: 12px !important;
+}
+
+.lbg-entry-meta {
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.lbg-book-badge,
+.lbg-source-badge,
+.lbg-token-badge,
+.lbg-match-badge,
+.lbg-lock-badge,
+.lbg-block-badge,
+.lbg-edit-badge {
+    min-height: 20px;
+    padding: 2px 7px;
+    font-size: 0.66rem;
+}
+
+.lbg-tag-filter-list,
+.lbg-selected-tag-list,
+.lbg-entry-tags,
+.lbg-menu-tag-grid {
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.lbg-filter-tag,
+.lbg-tag,
+.lbg-menu-tag-button {
+    min-height: 20px;
+    padding: 3px 7px !important;
+    font-size: 0.66rem !important;
+}
+
+.lbg-keys {
+    margin-top: 5px;
+    font-size: 0.62rem !important;
+    line-height: 1.18;
+}
+
+.lbg-preview,
+.lbg-prompt-preview {
+    margin-top: 6px;
+    padding: 9px;
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
+
+.lbg-preview {
+    max-height: 118px;
+}
+
+.lbg-entry-menu-inline {
+    margin-top: 6px;
+}
+
+.lbg-entry-menu-inline > summary {
+    padding: 3px 8px;
+    font-size: 0.7rem;
+}
+
+.lbg-edit-modal {
+    width: min(1000px, calc(100vw - 32px));
+    height: min(82dvh, 900px);
+    min-height: 70dvh;
+}
+
+.lbg-edit-textarea {
+    padding: 12px !important;
+    font-size: 0.76rem !important;
+    line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+    .lbg-entry-top {
+        display: block;
+        flex-direction: initial;
+        align-items: initial;
+        min-height: 28px;
+        padding-right: 116px;
+    }
+
+    .lbg-entry-actions {
+        top: 0;
+        right: 0;
+        grid-template-columns: repeat(4, 26px);
+        gap: 4px;
+        justify-content: end;
+    }
+
+    .lbg-icon-button {
+        width: 26px !important;
+        min-width: 26px !important;
+        height: 26px !important;
+        min-height: 26px !important;
+        font-size: 11px !important;
+    }
+
+    .lbg-entry-title {
+        font-size: 0.82rem;
+        line-height: 1.16;
+    }
+
+    .lbg-card-entry,
+    .lbg-entry {
+        padding: 9px !important;
+    }
+
+    .lbg-preview {
+        max-height: 105px;
+    }
+
+    .lbg-edit-modal {
+        width: calc(100vw - 20px);
+        height: calc(100dvh - 20px);
+        min-height: 82dvh;
+    }
+}
+
