@@ -6,7 +6,8 @@ export function findActiveEntries(entries, promptText, options = {}) {
             const matchType = getEntryMatchType(entry, promptText, normalizedPrompt);
             if (matchType === 'none') return null;
 
-            const triggerScanText = buildTriggerScanTextForEntry(entry, options);
+            const triggerScanTexts = buildTriggerScanTextsForEntry(entry, options);
+            const matchedKeywords = findMatchedKeywords(entry, triggerScanTexts, options);
 
             return {
                 ...entry,
@@ -14,7 +15,8 @@ export function findActiveEntries(entries, promptText, options = {}) {
                 originallyActive: true,
                 selected: true,
                 matchType,
-                matchedKeywords: findMatchedKeywords(entry, triggerScanText, options),
+                matchedKeywords,
+                triggerMatchSource: matchedKeywords.length ? getFirstTriggerMatchSource(entry, triggerScanTexts, matchedKeywords, options) : '',
             };
         })
         .filter(Boolean);
@@ -34,21 +36,51 @@ export function splitActiveAndInactive(entries, activeEntries) {
                 selected: false,
                 matchType: 'none',
                 matchedKeywords: [],
+                triggerMatchSource: '',
             })),
     };
 }
 
-function buildTriggerScanTextForEntry(entry, options = {}) {
+function buildTriggerScanTextsForEntry(entry, options = {}) {
+    const scanDepth = getEntryScanDepth(entry, options.defaultScanDepth);
+    const includeNames = options.includeNames !== false;
+    const texts = [];
+
+    if (Array.isArray(options.triggerScanMessageSources) && options.triggerScanMessageSources.length) {
+        for (const source of options.triggerScanMessageSources) {
+            const messages = Array.isArray(source?.messages) ? source.messages : [];
+            const text = buildScanTextFromMessages(messages, scanDepth, includeNames);
+            addUniqueScanText(texts, text, source?.label || 'messages');
+        }
+    }
+
     if (Array.isArray(options.triggerScanMessages) && options.triggerScanMessages.length) {
-        const scanDepth = getEntryScanDepth(entry, options.defaultScanDepth);
-        return buildScanTextFromMessages(options.triggerScanMessages, scanDepth, options.includeNames);
+        const text = buildScanTextFromMessages(options.triggerScanMessages, scanDepth, includeNames);
+        addUniqueScanText(texts, text, 'triggerScanMessages');
+    }
+
+    if (Array.isArray(options.triggerScanTexts)) {
+        for (const item of options.triggerScanTexts) {
+            if (typeof item === 'string') {
+                addUniqueScanText(texts, item, 'triggerScanText');
+            } else {
+                addUniqueScanText(texts, item?.text, item?.label || 'triggerScanText');
+            }
+        }
     }
 
     if (Object.prototype.hasOwnProperty.call(options, 'triggerScanText')) {
-        return String(options.triggerScanText || '');
+        addUniqueScanText(texts, options.triggerScanText, 'triggerScanText');
     }
 
-    return '';
+    return texts;
+}
+
+function addUniqueScanText(texts, value, label = 'scan') {
+    const text = normalizeForMatching(value);
+    if (!text) return;
+    if (texts.some((item) => item.text === text)) return;
+    texts.push({ text, label });
 }
 
 function buildScanTextFromMessages(messages, scanDepth, includeNames = true) {
@@ -112,93 +144,161 @@ function getEntryScanDepth(entry, fallbackDepth) {
         entry?.scan_depth,
         entry?.raw?.scanDepth,
         entry?.raw?.scan_depth,
+        entry?.raw?.scan_depth_override,
+        entry?.raw?.scanDepthOverride,
     ];
 
     for (const candidate of candidates) {
         const value = Number(candidate);
-        if (Number.isFinite(value) && value >= 0) return Math.floor(value);
+        if (Number.isFinite(value) && value > 0) return Math.floor(value);
     }
 
     const fallback = Number(fallbackDepth);
-    return Number.isFinite(fallback) && fallback >= 0 ? Math.floor(fallback) : 2;
+    return Number.isFinite(fallback) && fallback > 0 ? Math.floor(fallback) : 2;
 }
 
-function findMatchedKeywords(entry, triggerScanText, options = {}) {
-    const keys = [...(entry?.keys || []), ...(entry?.secondaryKeys || [])]
-        .flatMap(splitPossibleKeywordList)
-        .map((key) => String(key || '').trim())
-        .filter(Boolean);
-
+function findMatchedKeywords(entry, triggerScanTexts, options = {}) {
+    const keys = getEntryKeywords(entry);
     if (!keys.length) return [];
 
-    const haystack = normalizeForMatching(triggerScanText);
-    if (!haystack) return [];
+    const scanTexts = normalizeScanTextList(triggerScanTexts);
+    if (!scanTexts.length) return [];
 
     const matched = [];
 
     for (const key of keys) {
         if (!key || matched.some((value) => value.toLowerCase() === key.toLowerCase())) continue;
 
-        const match = matchKeyword(haystack, key, {
-            caseSensitive: getEntryBooleanOption(entry, 'caseSensitive', options.caseSensitive),
-            matchWholeWords: getEntryBooleanOption(entry, 'matchWholeWords', options.matchWholeWords),
-        });
+        for (const item of scanTexts) {
+            const match = matchKeyword(item.text, key, {
+                caseSensitive: getEntryBooleanOption(entry, 'caseSensitive', options.caseSensitive),
+                matchWholeWords: getEntryBooleanOption(entry, 'matchWholeWords', options.matchWholeWords),
+            });
 
-        if (match) matched.push(match);
+            if (match) {
+                matched.push(match);
+                break;
+            }
+        }
     }
 
     return matched;
 }
 
+function getFirstTriggerMatchSource(entry, triggerScanTexts, matchedKeywords, options = {}) {
+    const firstKeyword = matchedKeywords?.[0];
+    if (!firstKeyword) return '';
+
+    const scanTexts = normalizeScanTextList(triggerScanTexts);
+
+    for (const item of scanTexts) {
+        const match = matchKeyword(item.text, firstKeyword, {
+            caseSensitive: getEntryBooleanOption(entry, 'caseSensitive', options.caseSensitive),
+            matchWholeWords: getEntryBooleanOption(entry, 'matchWholeWords', options.matchWholeWords),
+        });
+
+        if (match) return item.label || '';
+    }
+
+    return '';
+}
+
+function normalizeScanTextList(triggerScanTexts) {
+    if (!Array.isArray(triggerScanTexts)) return [];
+
+    return triggerScanTexts
+        .map((item) => {
+            if (typeof item === 'string') return { text: normalizeForMatching(item), label: 'scan' };
+            return {
+                text: normalizeForMatching(item?.text),
+                label: String(item?.label || 'scan'),
+            };
+        })
+        .filter((item) => item.text);
+}
+
+function getEntryKeywords(entry) {
+    return [
+        ...(entry?.keys || []),
+        ...(entry?.secondaryKeys || []),
+        entry?.raw?.key,
+        entry?.raw?.keysecondary,
+    ]
+        .flatMap(splitPossibleKeywordList)
+        .map((key) => String(key || '').trim())
+        .filter(Boolean);
+}
+
 function getEntryBooleanOption(entry, fieldName, fallbackValue) {
-    const value = entry?.[fieldName] ?? entry?.raw?.[fieldName];
-    if (typeof value === 'boolean') return value;
+    const candidates = [
+        entry?.[fieldName],
+        entry?.raw?.[fieldName],
+        fieldName === 'caseSensitive' ? entry?.raw?.case_sensitive : undefined,
+        fieldName === 'caseSensitive' ? entry?.raw?.caseSensitive : undefined,
+        fieldName === 'matchWholeWords' ? entry?.raw?.match_whole_words : undefined,
+        fieldName === 'matchWholeWords' ? entry?.raw?.matchWholeWords : undefined,
+    ];
+
+    for (const value of candidates) {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === 'true') return true;
+            if (normalized === 'false') return false;
+        }
+    }
+
     return Boolean(fallbackValue);
 }
 
 function matchKeyword(text, key, options = {}) {
-    if (isRegexKey(key)) {
+    const scanText = String(text || '');
+    const keyword = String(key || '').trim();
+
+    if (!scanText || !keyword) return null;
+
+    if (isRegexKey(keyword)) {
         try {
-            const regex = parseRegexKey(key);
-            const match = text.match(regex);
+            const regex = parseRegexKey(keyword, Boolean(options.caseSensitive));
+            const match = scanText.match(regex);
             return match ? match[0] : null;
         } catch (error) {
-            console.warn('Lorebook Gatekeeper: invalid regex keyword skipped.', key, error);
+            console.warn('Lorebook Gatekeeper: invalid regex keyword skipped.', keyword, error);
             return null;
         }
     }
 
     const caseSensitive = Boolean(options.caseSensitive);
     const matchWholeWords = Boolean(options.matchWholeWords);
+    const haystack = caseSensitive ? scanText : scanText.toLowerCase();
+    const needle = caseSensitive ? keyword : keyword.toLowerCase();
 
     if (!matchWholeWords) {
-        const haystack = caseSensitive ? text : text.toLowerCase();
-        const needle = caseSensitive ? key : key.toLowerCase();
-        return haystack.includes(needle) ? key : null;
+        return haystack.includes(needle) ? keyword : null;
     }
 
-    const escapedKey = escapeRegExp(caseSensitive ? key : key.toLowerCase());
-    const haystack = caseSensitive ? text : text.toLowerCase();
-    const keyWords = String(key).trim().split(/\s+/);
+    const escapedNeedle = escapeRegExp(needle);
+    const isSingleWord = !/\s/.test(needle);
 
-    if (keyWords.length > 1) {
-        return haystack.includes(caseSensitive ? key : key.toLowerCase()) ? key : null;
+    if (!isSingleWord) {
+        return haystack.includes(needle) ? keyword : null;
     }
 
-    // Mirrors SillyTavern's whole-word behavior: one-word keys should not trigger inside another word.
-    const regex = new RegExp(`(?:^|\\W)(${escapedKey})(?:$|\\W)`, 'u');
-    return regex.test(haystack) ? key : null;
+    // Unicode-aware word boundary. JS \b / \W are ASCII-centric and behave poorly for Cyrillic keys.
+    const regex = new RegExp(`(^|[^\\p{L}\\p{N}_])(${escapedNeedle})(?=$|[^\\p{L}\\p{N}_])`, 'u');
+    return regex.test(haystack) ? keyword : null;
 }
 
 function isRegexKey(key) {
     return typeof key === 'string' && key.startsWith('/') && key.lastIndexOf('/') > 0;
 }
 
-function parseRegexKey(key) {
+function parseRegexKey(key, caseSensitive = false) {
     const lastSlash = key.lastIndexOf('/');
     const pattern = key.slice(1, lastSlash);
     const rawFlags = key.slice(lastSlash + 1);
-    const flags = [...new Set(rawFlags.split('').filter(Boolean))].join('');
+    const baseFlags = caseSensitive ? rawFlags : `${rawFlags}i`;
+    const flags = [...new Set(baseFlags.split('').filter(Boolean))].join('');
 
     return new RegExp(pattern, flags);
 }
@@ -208,6 +308,17 @@ function escapeRegExp(value) {
 }
 
 function splitPossibleKeywordList(value) {
+    if (Array.isArray(value)) return value.flatMap(splitPossibleKeywordList);
+
+    if (value && typeof value === 'object') {
+        return [
+            value.key,
+            value.value,
+            value.text,
+            value.name,
+        ].flatMap(splitPossibleKeywordList);
+    }
+
     return String(value || '')
         .split(/[,;|]/)
         .map((item) => item.trim())

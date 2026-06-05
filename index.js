@@ -83,7 +83,9 @@ async function reviewPrompt(promptText, options = {}) {
     const allEntries = await collectWorldInfoEntries();
     const activeEntries = findActiveEntries(allEntries, promptText, {
         triggerScanText: options.triggerScanText,
+        triggerScanTexts: options.triggerScanTexts,
         triggerScanMessages: options.triggerScanMessages,
+        triggerScanMessageSources: options.triggerScanMessageSources,
         defaultScanDepth: options.defaultScanDepth,
         includeNames: options.includeNames,
         caseSensitive: options.caseSensitive,
@@ -119,23 +121,39 @@ async function handleReviewResult(result, applyChanges) {
 }
 
 function buildTriggerScanOptions(fallbackChat = []) {
-    const triggerScanMessages = getTriggerScanMessages(fallbackChat);
+    const triggerScanMessageSources = getTriggerScanMessageSources(fallbackChat);
     const defaultScanDepth = getWorldInfoScanDepth();
     const includeNames = getWorldInfoIncludeNames();
-    const caseSensitive = Boolean(world_info_case_sensitive);
-    const matchWholeWords = Boolean(world_info_match_whole_words);
+    const caseSensitive = getWorldInfoCaseSensitive();
+    const matchWholeWords = getWorldInfoMatchWholeWords();
 
-    const triggerScanText = buildTriggerScanTextFromMessages(triggerScanMessages, defaultScanDepth, includeNames);
+    const triggerScanTexts = triggerScanMessageSources
+        .map((source) => ({
+            label: source.label,
+            text: buildTriggerScanTextFromMessages(source.messages, defaultScanDepth, includeNames),
+        }))
+        .filter((source) => source.text);
+
+    const primaryScanText = triggerScanTexts[0]?.text || '';
 
     console.debug(`${MODULE_NAME}: trigger scan prepared.`, {
-        sourceMessages: triggerScanMessages.length,
+        sources: triggerScanMessageSources.map((source) => ({
+            label: source.label,
+            messages: source.messages.length,
+        })),
         defaultScanDepth,
-        triggerScanTextLength: triggerScanText.length,
+        includeNames,
+        caseSensitive,
+        matchWholeWords,
+        triggerScanTextLength: primaryScanText.length,
+        triggerScanSourceCount: triggerScanTexts.length,
     });
 
     return {
-        triggerScanText,
-        triggerScanMessages,
+        triggerScanText: primaryScanText,
+        triggerScanTexts,
+        triggerScanMessages: triggerScanMessageSources[0]?.messages || [],
+        triggerScanMessageSources,
         defaultScanDepth,
         includeNames,
         caseSensitive,
@@ -143,22 +161,38 @@ function buildTriggerScanOptions(fallbackChat = []) {
     };
 }
 
-function getTriggerScanMessages(fallbackChat = []) {
+function getTriggerScanMessageSources(fallbackChat = []) {
     const context = getSafeContext();
-    const candidates = [
-        context?.chat,
-        globalThis.chat,
-        fallbackChat,
+    const sources = [
+        { label: 'context.chat', value: context?.chat },
+        { label: 'globalThis.chat', value: globalThis.chat },
+        { label: 'event.chat', value: fallbackChat },
     ];
 
-    for (const candidate of candidates) {
-        if (!Array.isArray(candidate) || !candidate.length) continue;
+    const result = [];
+    const seen = new Set();
 
-        const messages = normalizeTriggerMessages(candidate);
-        if (messages.length) return messages;
+    for (const source of sources) {
+        if (!Array.isArray(source.value) || !source.value.length) continue;
+
+        const messages = normalizeTriggerMessages(source.value);
+        if (!messages.length) continue;
+
+        const signature = messages
+            .map((message) => `${message.name || ''}:${message.role || ''}:${message.content || ''}`)
+            .join('\n---\n');
+
+        if (seen.has(signature)) continue;
+        seen.add(signature);
+
+        result.push({ label: source.label, messages });
     }
 
-    return [];
+    return result;
+}
+
+function getTriggerScanMessages(fallbackChat = []) {
+    return getTriggerScanMessageSources(fallbackChat)[0]?.messages || [];
 }
 
 function normalizeTriggerMessages(messages) {
@@ -243,20 +277,17 @@ function extractMessageContent(message) {
 }
 
 function getWorldInfoScanDepth() {
-    const importedDepth = Number(world_info_depth);
-    if (Number.isFinite(importedDepth) && importedDepth >= 0) return Math.floor(importedDepth);
+    const candidates = [];
 
-    const candidates = [
+    // Prefer live UI/context values over the imported binding: in some SillyTavern builds
+    // the imported value can be stale during third-party extension execution.
+    candidates.push(
         getNumericDomValue('#world_info_depth'),
         getNumericDomValue('#world_info_depth_counter'),
         getNumericDomValue('#wi_depth'),
         getNumericDomValue('#world_info_scan_depth'),
         getNumericDomValue('[name="world_info_depth"]'),
-        getNestedNumber(globalThis, ['world_info_depth']),
-        getNestedNumber(globalThis, ['power_user', 'world_info_depth']),
-        getNestedNumber(globalThis, ['power_user', 'world_info', 'depth']),
-        getNestedNumber(globalThis, ['SillyTavern', 'settings', 'world_info_depth']),
-    ];
+    );
 
     const context = getSafeContext();
     candidates.push(
@@ -265,19 +296,72 @@ function getWorldInfoScanDepth() {
         getNestedNumber(context, ['worldInfoSettings', 'depth']),
         getNestedNumber(context, ['powerUserSettings', 'world_info_depth']),
         getNestedNumber(context, ['extensionSettings', 'world_info_depth']),
+        getNestedNumber(globalThis, ['world_info_depth']),
+        getNestedNumber(globalThis, ['power_user', 'world_info_depth']),
+        getNestedNumber(globalThis, ['power_user', 'world_info', 'depth']),
+        getNestedNumber(globalThis, ['SillyTavern', 'settings', 'world_info_depth']),
+        Number(world_info_depth),
     );
 
     for (const candidate of candidates) {
         const value = Number(candidate);
-        if (Number.isFinite(value) && value >= 0) return Math.floor(value);
+        if (Number.isFinite(value) && value > 0) return Math.floor(value);
     }
 
+    // This extension is only explaining keyword activation. If ST reports an unusable
+    // depth, keep diagnostics useful and avoid falling back to the whole prompt/history.
     return 2;
 }
 
 function getWorldInfoIncludeNames() {
-    if (typeof world_info_include_names === 'boolean') return world_info_include_names;
+    const candidates = [
+        getBooleanDomValue('#world_info_include_names'),
+        getNestedBoolean(getSafeContext(), ['world_info_include_names']),
+        getNestedBoolean(getSafeContext(), ['worldInfoSettings', 'includeNames']),
+        getNestedBoolean(globalThis, ['world_info_include_names']),
+        world_info_include_names,
+    ];
+
+    for (const candidate of candidates) {
+        const value = normalizeBoolean(candidate);
+        if (typeof value === 'boolean') return value;
+    }
+
     return true;
+}
+
+function getWorldInfoCaseSensitive() {
+    const candidates = [
+        getBooleanDomValue('#world_info_case_sensitive'),
+        getNestedBoolean(getSafeContext(), ['world_info_case_sensitive']),
+        getNestedBoolean(getSafeContext(), ['worldInfoSettings', 'caseSensitive']),
+        getNestedBoolean(globalThis, ['world_info_case_sensitive']),
+        world_info_case_sensitive,
+    ];
+
+    for (const candidate of candidates) {
+        const value = normalizeBoolean(candidate);
+        if (typeof value === 'boolean') return value;
+    }
+
+    return false;
+}
+
+function getWorldInfoMatchWholeWords() {
+    const candidates = [
+        getBooleanDomValue('#world_info_match_whole_words'),
+        getNestedBoolean(getSafeContext(), ['world_info_match_whole_words']),
+        getNestedBoolean(getSafeContext(), ['worldInfoSettings', 'matchWholeWords']),
+        getNestedBoolean(globalThis, ['world_info_match_whole_words']),
+        world_info_match_whole_words,
+    ];
+
+    for (const candidate of candidates) {
+        const value = normalizeBoolean(candidate);
+        if (typeof value === 'boolean') return value;
+    }
+
+    return false;
 }
 
 function getSafeContext() {
@@ -292,6 +376,46 @@ function getSafeContext() {
     } catch {
         return null;
     }
+}
+
+function getBooleanDomValue(selector) {
+    try {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+
+        if (typeof element.checked === 'boolean') return element.checked;
+
+        const value = element.value ?? element.textContent;
+        return normalizeBoolean(value);
+    } catch {
+        return null;
+    }
+}
+
+function getNestedBoolean(source, path) {
+    try {
+        let current = source;
+        for (const key of path) {
+            if (typeof current === 'function') current = current();
+            current = current?.[key];
+        }
+
+        return normalizeBoolean(current);
+    } catch {
+        return null;
+    }
+}
+
+function normalizeBoolean(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'yes', 'on', 'checked'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'off', 'unchecked'].includes(normalized)) return false;
+    }
+
+    return null;
 }
 
 function getNumericDomValue(selector) {
