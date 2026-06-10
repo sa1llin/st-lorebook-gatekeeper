@@ -1484,4 +1484,34 @@ body.lbg-edit-open {
         grid-template-columns: 92px minmax(110px, 1fr) 48px;
     }
 }
-/* LBG_FUNCTIONAL_FEATURES_CSS_END */
+/* Динамические стили для гибкой кастомизации UI */
+.lbg-upgraded-root {
+    font-size: calc(13px * var(--lbg-ui-font-scale, 1)) !important;
+}
+
+.lbg-card-entry,
+.lbg-entry {
+    width: var(--lbg-entry-width, 100%) !important;
+    padding: calc(10px * var(--lbg-entry-density, 1)) !important;
+    margin-bottom: calc(8px * var(--lbg-entry-density, 1)) !important;
+}
+
+.lbg-entry-actions button,
+.lbg-icon-button {
+    transform: scale(var(--lbg-ui-button-scale, 1)) !important;
+    transform-origin: right center;
+}
+
+.lbg-search-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.lbg-layout-draggable {
+    border: 1px solid rgba(255,255,255,0.05);
+    padding: 6px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.01);
+}

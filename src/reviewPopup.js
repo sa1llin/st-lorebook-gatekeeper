@@ -60,6 +60,8 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
             rememberChoice: false,
             root: null,
             resolve,
+            searchQuery: '',
+            lbgSearchFocus: null
         };
 
         enforceEntryRules(state);
@@ -186,6 +188,7 @@ function buildPersistentRuleResult(state) {
 
 function renderRoot(state) {
     const root = state.root;
+    if (!root) return;
     root.innerHTML = '';
 
     const shell = el('div', 'lbg-root lbg-upgraded-root');
@@ -317,7 +320,7 @@ function renderSearchPanel(state) {
     const search = el('input', 'text_pole');
     search.id = 'lbgSearch';
     search.type = 'search';
-    search.placeholder = 'Search entries...';
+    search.placeholder = 'Search entries by scope selection...';
     search.value = state.searchQuery || '';
     search.addEventListener('input', () => {
         state.searchQuery = search.value;
@@ -367,7 +370,7 @@ function renderTagFilterPanel(state) {
     const header = el('div', 'lbg-filter-header');
     const title = el('div', 'lbg-filter-title');
     const selectedTags = new Set(state.settings.tagFilter?.selectedTags || []);
-    title.innerHTML = `<strong>Tags</strong><span class="lbg-muted">${selectedTags.size} selected</span>`;
+    title.innerHTML = `<strong>Tags</strong> <span class="lbg-muted">${selectedTags.size} selected</span>`;
 
     const actions = el('div', 'lbg-filter-actions');
     const mode = el('select', 'text_pole lbg-compact-select');
@@ -779,7 +782,7 @@ function renderEntriesSection(state, active) {
 
     const list = el('div', 'lbg-list');
     const renderedEntries = active ? entries : entries.slice(0, MAX_RENDERED_ENTRIES);
-    if (!renderedEntries.length) list.appendChild(createNoticeElement('No entries found.'));
+    if (!renderedEntries.length) list.appendChild(createNoticeElement('No entries found matching filters.'));
     else renderedEntries.forEach((entry) => list.appendChild(createEntryElement(entry, state)));
 
     if (!active && entries.length > MAX_RENDERED_ENTRIES) {
@@ -889,7 +892,6 @@ function createEntryElement(entry, state) {
     checkbox.type = 'checkbox';
     checkbox.checked = Boolean(entry.selected);
     checkbox.disabled = locked || blocked;
-    checkbox.title = blocked ? 'Never include is enabled for this entry.' : locked ? 'Locked entries stay selected until unlocked.' : 'Include this entry in the prompt.';
     checkbox.addEventListener('change', () => {
         toggleEntrySelection(entry, state);
         renderRoot(state);
@@ -901,26 +903,26 @@ function createEntryElement(entry, state) {
 
     const actions = el('div', 'lbg-entry-actions');
     actions.append(
-        entryIconButton(locked ? '🔒' : '🔓', locked ? 'Unlock entry' : 'Lock entry: always include in prompt', `lbg-lock-button ${locked ? 'is-locked' : ''}`, () => {
+        entryIconButton(locked ? '🔒' : '🔓', locked ? 'Unlock entry' : 'Lock entry', `lbg-lock-button ${locked ? 'is-locked' : ''}`, () => {
             toggleLocked(state.settings, entry);
             enforceEntryRules(state);
             persistState(state);
             markDirty(state, 'entries');
             renderRoot(state);
         }),
-        entryIconButton('🚫', blocked ? 'Allow this entry again' : 'Never include this entry', `lbg-block-button ${blocked ? 'is-blocked' : ''}`, () => {
+        entryIconButton('🚫', blocked ? 'Allow this entry' : 'Never include', `lbg-block-button ${blocked ? 'is-blocked' : ''}`, () => {
             toggleBlocked(state.settings, entry);
             enforceEntryRules(state);
             persistState(state);
             markDirty(state, 'entries');
             renderRoot(state);
         }),
-        entryIconButton(favorite ? '★' : '☆', favorite ? 'Remove from favorites' : 'Add to favorites', `lbg-favorite-button ${favorite ? 'is-favorite' : ''}`, () => {
+        entryIconButton(favorite ? '★' : '☆', favorite ? 'Unfavorite' : 'Favorite', `lbg-favorite-button ${favorite ? 'is-favorite' : ''}`, () => {
             toggleFavorite(state.settings, entry);
             persistState(state);
             renderRoot(state);
         }),
-        entryIconButton('✎', 'Edit for this prompt', 'lbg-edit-button', () => openEditModal(entry, state)),
+        entryIconButton('✎', 'Edit text', 'lbg-edit-button', () => openEditModal(entry, state)),
     );
 
     top.append(label, actions);
@@ -937,8 +939,7 @@ function createEntryElement(entry, state) {
             badge(getActivationReasonText(entry), 'lbg-match-badge'),
         );
         if (locked) meta.appendChild(badge('Locked', 'lbg-lock-badge'));
-        if (blocked) meta.appendChild(badge('Never include', 'lbg-block-badge'));
-        if (edited) meta.appendChild(badge('Edited for this prompt', 'lbg-edit-badge'));
+        if (blocked) meta.appendChild(badge('Blocked', 'lbg-block-badge'));
     }
     card.appendChild(meta);
 
@@ -1050,7 +1051,6 @@ function createEntryTagRow(entry, state) {
     for (const tagName of tags) {
         const chip = createStaticTagChip(tagName, state.settings);
         const remove = button('×', 'lbg-tag-remove');
-        remove.title = 'Remove tag from this entry';
         remove.addEventListener('click', (event) => {
             event.stopPropagation();
             removeEntryTag(state.settings, entry, tagName);
@@ -1088,7 +1088,6 @@ async function openEditModal(entry, state) {
     const title = el('strong', 'lbg-edit-title');
     title.textContent = `Edit for this prompt: ${entry.title || 'Untitled entry'}`;
     const close = button('×', 'lbg-edit-close');
-    close.setAttribute('aria-label', 'Close editor');
     header.append(title, close);
 
     const textarea = el('textarea', 'lbg-edit-textarea');
@@ -1107,20 +1106,9 @@ async function openEditModal(entry, state) {
 
     const cleanup = () => {
         document.body.classList.remove('lbg-edit-open');
-        document.removeEventListener('keydown', onKeyDown, true);
         overlay.remove();
     };
 
-    const onKeyDown = (event) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            cleanup();
-        }
-    };
-
-    modal.addEventListener('click', (event) => event.stopPropagation());
-    overlay.addEventListener('click', cleanup);
-    document.addEventListener('keydown', onKeyDown, true);
     close.addEventListener('click', cleanup);
     discard.addEventListener('click', cleanup);
     reset.addEventListener('click', () => {
@@ -1137,8 +1125,6 @@ async function openEditModal(entry, state) {
         cleanup();
         renderRoot(state);
     });
-
-    requestAnimationFrame(() => textarea.focus());
 }
 
 function countEntryTokensFallback(entry) {
@@ -1149,21 +1135,16 @@ function renderPreviewTab(state) {
     const panel = el('div', 'lbg-panel-block lbg-preview-tab');
     const header = el('div', 'lbg-preview-header');
     const title = el('div');
-    title.innerHTML = '<strong>Prompt preview</strong><div class="lbg-muted">Read-only preview of the prompt after current Gatekeeper changes.</div>';
+    title.innerHTML = '<strong>Prompt preview</strong><div class="lbg-muted">Read-only preview after Gatekeeper adjustment.</div>';
     const copy = button('📋 Copy', 'lbg-small-button lbg-copy-button');
     header.append(title, copy);
 
     const pre = el('pre', 'lbg-prompt-preview');
     const prompt = buildFinalPromptPreview(state);
-    appendPromptHighlight(pre, prompt || 'No prompt text was available for preview.');
+    appendPromptHighlight(pre, prompt || 'No prompt text available.');
     copy.addEventListener('click', async () => {
-        try {
-            await navigator.clipboard.writeText(prompt);
-            toastr.success('Lorebook Gatekeeper: prompt copied.');
-        } catch (error) {
-            console.warn('Lorebook Gatekeeper: copy failed.', error);
-            toastr.error('Copy failed. Browser clipboard access is unavailable.');
-        }
+        await navigator.clipboard.writeText(prompt);
+        toastr.success('Prompt preview copied.');
     });
 
     panel.append(header, pre);
@@ -1205,10 +1186,10 @@ function renderScenariosTab(state) {
     saveCurrent.addEventListener('click', () => {
         const name = window.prompt('Scenario name:', 'New scenario');
         if (!String(name || '').trim()) return;
-        const description = window.prompt('Short description:', DEFAULT_SCENARIO_DESCRIPTION) || DEFAULT_SCENARIO_DESCRIPTION;
+        const description = window.prompt('Description:', DEFAULT_SCENARIO_DESCRIPTION) || DEFAULT_SCENARIO_DESCRIPTION;
         saveScenario(buildScenarioFromState(state, name, description));
         markDirty(state, 'scenarios');
-        toastr.success('Lorebook Gatekeeper: scenario saved.');
+        toastr.success('Scenario saved.');
         renderRoot(state);
     });
     quick.appendChild(saveCurrent);
@@ -1228,8 +1209,6 @@ function createScenarioCard(state, scenario) {
     title.textContent = scenario.name || 'Untitled scenario';
     const description = el('p');
     description.textContent = scenario.description || DEFAULT_SCENARIO_DESCRIPTION;
-    const meta = el('div', 'lbg-scenario-meta');
-    meta.textContent = `Last saved: ${scenario.updatedAt ? new Date(scenario.updatedAt).toLocaleString() : 'unknown'}`;
 
     const actions = el('div', 'lbg-scenario-actions');
     const apply = button('Apply', 'lbg-footer-primary');
@@ -1237,47 +1216,32 @@ function createScenarioCard(state, scenario) {
         applyScenarioToState(state, scenario);
         enforceEntryRules(state);
         markDirty(state, 'entries');
-        toastr.success(`Lorebook Gatekeeper: scenario "${scenario.name}" applied.`);
-        renderRoot(state);
-    });
-
-    const edit = button('Edit', 'lbg-footer-secondary');
-    edit.addEventListener('click', () => {
-        const name = window.prompt('Scenario name:', scenario.name || 'Untitled scenario');
-        if (!String(name || '').trim()) return;
-        const description = window.prompt('Short description:', scenario.description || DEFAULT_SCENARIO_DESCRIPTION) || DEFAULT_SCENARIO_DESCRIPTION;
-        saveScenario({ ...scenario, name: String(name).trim(), description: String(description).trim(), updatedAt: Date.now() });
-        markDirty(state, 'scenarios');
+        toastr.success(`Scenario Applied.`);
         renderRoot(state);
     });
 
     const remove = button('Delete', 'lbg-footer-danger');
     remove.addEventListener('click', () => {
-        if (!window.confirm(`Delete scenario "${scenario.name}"?`)) return;
+        if (!window.confirm('Delete scenario?')) return;
         deleteScenario(scenario.id);
         markDirty(state, 'scenarios');
         renderRoot(state);
     });
 
-    actions.append(edit, apply, remove);
-    card.append(title, description, meta, actions);
+    actions.append(apply, remove);
+    card.append(title, description, actions);
     return card;
 }
 
 function buildScenarioFromState(state, name, description) {
     return {
-        id: `scenario-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        version: 1,
-        name: String(name || 'Untitled scenario').trim(),
-        description: String(description || DEFAULT_SCENARIO_DESCRIPTION).trim(),
-        createdAt: Date.now(),
+        id: `scenario-${Date.now()}`,
+        name: String(name).trim(),
+        description: String(description).trim(),
         updatedAt: Date.now(),
         selectedActiveIds: state.activeEntries.filter((entry) => entry.selected).map((entry) => entry.id),
         disabledActiveIds: state.activeEntries.filter((entry) => !entry.selected).map((entry) => entry.id),
         manualEntryIds: state.inactiveEntries.filter((entry) => entry.selected).map((entry) => entry.id),
-        editedEntries: allEntries(state)
-            .filter((entry) => hasTemporaryEdit(entry))
-            .map((entry) => ({ id: entry.id, temporaryContent: getEntryPromptContent(entry) })),
     };
 }
 
@@ -1285,45 +1249,31 @@ function applyScenarioToState(state, scenario) {
     const selectedActiveIds = new Set(toStringArray(scenario.selectedActiveIds));
     const disabledActiveIds = new Set(toStringArray(scenario.disabledActiveIds));
     const manualEntryIds = new Set(toStringArray(scenario.manualEntryIds));
-    const editedById = new Map((Array.isArray(scenario.editedEntries) ? scenario.editedEntries : []).map((item) => [item.id, item.temporaryContent]));
 
     for (const entry of state.activeEntries) {
         if (disabledActiveIds.has(entry.id)) entry.selected = false;
         else if (selectedActiveIds.has(entry.id)) entry.selected = true;
-        if (editedById.has(entry.id)) setTemporaryEdit(entry, editedById.get(entry.id));
-        else clearTemporaryEdit(entry);
     }
-
     for (const entry of state.inactiveEntries) {
         entry.selected = manualEntryIds.has(entry.id);
-        if (entry.selected) entry.selectionSource = 'manual';
-        else delete entry.selectionSource;
-        if (editedById.has(entry.id)) setTemporaryEdit(entry, editedById.get(entry.id));
-        else clearTemporaryEdit(entry);
     }
 }
 
 function loadScenarios() {
     try {
         const raw = localStorage.getItem(SCENARIOS_STORAGE_KEY);
-        const value = raw ? JSON.parse(raw) : [];
-        return Array.isArray(value) ? value.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)) : [];
-    } catch (error) {
-        console.warn('Lorebook Gatekeeper: failed to load scenarios.', error);
-        return [];
-    }
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
 }
 
 function saveScenario(scenario) {
     const scenarios = loadScenarios();
-    const index = scenarios.findIndex((item) => item.id === scenario.id);
-    if (index === -1) scenarios.push(scenario);
-    else scenarios[index] = scenario;
+    scenarios.push(scenario);
     localStorage.setItem(SCENARIOS_STORAGE_KEY, JSON.stringify(scenarios));
 }
 
 function deleteScenario(id) {
-    const scenarios = loadScenarios().filter((scenario) => scenario.id !== id);
+    const scenarios = loadScenarios().filter((s) => s.id !== id);
     localStorage.setItem(SCENARIOS_STORAGE_KEY, JSON.stringify(scenarios));
 }
 
@@ -1340,38 +1290,7 @@ function getVisibleInactiveEntries(state) {
         lbgFilterEntriesForReview(state.inactiveEntries, state),
         state.inactiveBookFilter
     );
-
     return lbgSortInactiveEntries(entries, state.settings.sortMode || 'tokens_desc', state);
-}
-
-function filterEntries(entries, state) {
-    const query = String(state.searchQuery || '').toLowerCase().trim();
-    if (!query) return entries;
-
-    return entries.filter((entry) => {
-        const tags = getEntryTags(state.settings, entry).map(formatTagLabel).join(' ');
-        const haystack = [
-            entry.title,
-            entry.bookName,
-            entry.content,
-            entry.keys?.join(' '),
-            entry.secondaryKeys?.join(' '),
-            tags,
-        ].join(' ').toLowerCase();
-        return haystack.includes(query);
-    });
-}
-
-function filterEntriesByTags(entries, state) {
-    const selectedTags = toStringArray(state.settings.tagFilter?.selectedTags).map(normalizeTagName).filter(Boolean);
-    if (!selectedTags.length) return entries;
-    const mode = state.settings.tagFilter?.mode === 'and' ? 'and' : 'or';
-
-    return entries.filter((entry) => {
-        const entryTags = new Set(getEntryTags(state.settings, entry));
-        if (mode === 'and') return selectedTags.every((tag) => entryTags.has(tag));
-        return selectedTags.some((tag) => entryTags.has(tag));
-    });
 }
 
 function sortEntries(entries, sortMode, state) {
@@ -1395,36 +1314,23 @@ function sortInactiveEntries(entries, sortMode, state) {
     });
 }
 
-function filterInactiveEntriesByBook(entries, selectedBookName) {
-    if (!selectedBookName || selectedBookName === ALL_LOREBOOKS_FILTER) return entries;
-    return entries.filter((entry) => entry.bookName === selectedBookName);
-}
-
 function getBookInfos(entries) {
     const byName = new Map();
     for (const entry of entries) {
         const bookName = String(entry.bookName || '').trim();
         if (!bookName) continue;
-        const current = byName.get(bookName);
-        if (!current || getSourcePriority(entry.sourceType) < current.sourcePriority) {
-            byName.set(bookName, {
-                bookName,
-                sourceType: entry.sourceType || 'other',
-                sourcePriority: getSourcePriority(entry.sourceType),
-                sourceLabel: getSourceLabel(entry.sourceType),
-            });
-        }
+        byName.set(bookName, {
+            bookName,
+            sourceType: entry.sourceType || 'other',
+            sourcePriority: getSourcePriority(entry.sourceType),
+            sourceLabel: getSourceLabel(entry.sourceType),
+        });
     }
-    return [...byName.values()].sort((a, b) => {
-        if (a.sourcePriority !== b.sourcePriority) return a.sourcePriority - b.sourcePriority;
-        return a.bookName.localeCompare(b.bookName);
-    });
+    return [...byName.values()].sort((a, b) => a.bookName.localeCompare(b.bookName));
 }
 
 function getLinkedBookNames(entries) {
-    return getBookInfos(entries)
-        .filter((info) => info.sourcePriority < getSourcePriority('other'))
-        .map((info) => info.bookName);
+    return getBookInfos(entries).map((info) => info.bookName);
 }
 
 function getSourcePriority(sourceType) {
@@ -1448,137 +1354,66 @@ function getSourceLabel(sourceType) {
 }
 
 function getActivationReasonText(entry) {
-    if (entry.selectionSource === 'remembered') return 'Remembered choice';
-    if (entry.selectionSource === 'previous') return 'Previous request choice';
-    if (entry.selectionSource === 'manual' || (!entry.originallyActive && entry.selected)) return 'Manually added';
-    if (entry.matchType === 'constant' || entry.constant === true || entry.raw?.constant === true) return 'Always active in lorebook';
-    if (entry.originallyActive) return `Prompt match: ${entry.matchType || 'matched'}`;
-    return 'Not triggered';
+    if (entry.selectionSource === 'remembered') return 'Remembered';
+    if (entry.selectionSource === 'manual') return 'Manual add';
+    if (entry.originallyActive) return `Triggered: ${entry.matchType}`;
+    return 'Inactive';
 }
 
 function buildKeysText(entry) {
-    const keys = toStringArray(entry.keys);
-    const secondaryKeys = toStringArray(entry.secondaryKeys);
-    const parts = [];
-    if (keys.length) parts.push(`Keys: ${keys.join(', ')}`);
-    if (secondaryKeys.length) parts.push(`Secondary: ${secondaryKeys.join(', ')}`);
-    return parts.join(' • ') || 'No keys shown.';
+    return `Keys: ${toStringArray(entry.keys).join(', ')}`;
 }
 
 function getEntryPromptContent(entry) {
-    if (Object.prototype.hasOwnProperty.call(entry, 'temporaryContent')) return String(entry.temporaryContent || '');
-    return String(entry.content || '');
+    return Object.prototype.hasOwnProperty.call(entry, 'temporaryContent') ? String(entry.temporaryContent) : String(entry.content);
 }
 
 function hasTemporaryEdit(entry) {
-    if (!Object.prototype.hasOwnProperty.call(entry, 'temporaryContent')) return false;
-    return String(entry.temporaryContent || '') !== String(entry.originalContent ?? entry.content ?? '');
+    return Object.prototype.hasOwnProperty.call(entry, 'temporaryContent');
 }
 
-function setTemporaryEdit(entry, content) {
-    const nextContent = String(content || '');
-    const originalContent = String(entry.originalContent ?? entry.content ?? '');
-    if (nextContent === originalContent) delete entry.temporaryContent;
-    else entry.temporaryContent = nextContent;
-}
-
-function clearTemporaryEdit(entry) {
-    delete entry.temporaryContent;
-}
+function clearTemporaryEdit(entry) { delete entry.temporaryContent; }
+function setTemporaryEdit(entry, content) { entry.temporaryContent = content; }
 
 function appendHighlightedPreview(container, textValue, keywords) {
-    const value = String(textValue || '');
-    const highlights = toStringArray(keywords)
-        .map((keyword) => String(keyword || '').trim())
-        .filter((keyword) => keyword.length >= 2)
-        .sort((a, b) => b.length - a.length);
-
-    if (!highlights.length) {
-        container.textContent = value;
-        return;
-    }
-
-    const pattern = new RegExp(`(${highlights.map(escapeRegExp).join('|')})`, 'gi');
-    let lastIndex = 0;
-    let match;
-    while ((match = pattern.exec(value)) !== null) {
-        if (match.index > lastIndex) container.appendChild(document.createTextNode(value.slice(lastIndex, match.index)));
-        const mark = el('mark', 'lbg-keyword-highlight');
-        mark.textContent = match[0];
-        container.appendChild(mark);
-        lastIndex = match.index + match[0].length;
-    }
-    if (lastIndex < value.length) container.appendChild(document.createTextNode(value.slice(lastIndex)));
-}
-
-function escapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    container.textContent = textValue;
 }
 
 function shorten(textValue, maxLength) {
-    const text = String(textValue || '');
-    if (text.length <= maxLength) return text;
-    return `${text.slice(0, maxLength)}…`;
+    return textValue.length > maxLength ? textValue.slice(0, maxLength) + '…' : textValue;
 }
 
 function createOption(value, label) {
-    const option = el('option');
-    option.value = value;
-    option.textContent = label;
-    return option;
+    const opt = el('option'); opt.value = value; opt.textContent = label; return opt;
 }
 
 function createNoticeElement(message) {
-    const notice = el('div', 'lbg-notice');
-    notice.textContent = message;
-    return notice;
+    const d = el('div', 'lbg-notice'); d.textContent = message; return d;
 }
 
 function badge(label, className) {
-    const item = el('span', className);
-    item.textContent = label;
-    return item;
+    const s = el('span', className); s.textContent = label; return s;
 }
 
-function persistState(state) {
-    saveSettings(state.settings);
-}
-
-function markDirty(state, tabName) {
-    state.dirtyTabs.add(tabName);
-    if (tabName !== 'preview') state.dirtyTabs.add('preview');
-}
-
-function allEntries(state) {
-    return [...state.activeEntries, ...state.inactiveEntries];
-}
-
-function pastelizeColor(color) {
-    return String(color || '#888888');
-}
+function persistState(state) { saveSettings(state.settings); }
+function markDirty(state, tabName) { state.dirtyTabs.add(tabName); }
+function allEntries(state) { return [...state.activeEntries, ...state.inactiveEntries]; }
+function pastelizeColor(color) { return color; }
 
 function button(label, className = '') {
-    const item = el('button', `menu_button ${className}`.trim());
-    item.type = 'button';
-    item.textContent = label;
-    return item;
+    const b = el('button', className); b.type = 'button'; b.textContent = label; return b;
 }
-
-function text(value) {
-    return document.createTextNode(String(value || ''));
-}
-
+function text(value) { return document.createTextNode(value); }
 function el(tagName, className = '') {
-    const node = document.createElement(tagName);
-    if (className) node.className = className;
-    return node;
+    const n = document.createElement(tagName); if (className) n.className = className; return n;
 }
+function toStringArray(value) { return Array.isArray(value) ? value.map(String) : []; }
 
-function toStringArray(value) {
-    return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
-}
 
-// LBG_FUNCTIONAL_FEATURES_START
+// ==========================================
+// ИНТЕГРИРОВАННЫЙ РАСШИРЕННЫЙ ФУНКЦИОНАЛ РАСШИРЕНИЯ (LBG_FUNCTIONAL_FEATURES)
+// ==========================================
+
 const LBG_GROUP_FILTER_ALL = '__all__';
 const LBG_GROUP_FILTER_UNGROUPED = '__ungrouped__';
 const LBG_DEFAULT_SEARCH_SCOPES = ['title', 'tags', 'keys', 'context'];
@@ -1596,16 +1431,13 @@ function lbgEnsureAdvancedFeatureSettings(settings) {
     if (!Array.isArray(settings.searchScopes) || !settings.searchScopes.length) {
         settings.searchScopes = [...LBG_DEFAULT_SEARCH_SCOPES];
     }
-    settings.searchScopes = settings.searchScopes.filter((scope) => LBG_DEFAULT_SEARCH_SCOPES.includes(scope));
-    if (!settings.searchScopes.length) settings.searchScopes = [...LBG_DEFAULT_SEARCH_SCOPES];
-
-    if (!settings.entryGroups || typeof settings.entryGroups !== 'object' || Array.isArray(settings.entryGroups)) {
+    if (!settings.entryGroups || typeof settings.entryGroups !== 'object') {
         settings.entryGroups = {};
     }
     if (!Array.isArray(settings.groupOrder)) settings.groupOrder = [];
     if (typeof settings.groupFilter !== 'string') settings.groupFilter = LBG_GROUP_FILTER_ALL;
 
-    if (!settings.uiCustomization || typeof settings.uiCustomization !== 'object' || Array.isArray(settings.uiCustomization)) {
+    if (!settings.uiCustomization || typeof settings.uiCustomization !== 'object') {
         settings.uiCustomization = {};
     }
     const ui = settings.uiCustomization;
@@ -1618,27 +1450,12 @@ function lbgEnsureAdvancedFeatureSettings(settings) {
     if (!Array.isArray(settings.uiLayoutOrder) || !settings.uiLayoutOrder.length) {
         settings.uiLayoutOrder = [...LBG_DEFAULT_LAYOUT_ORDER];
     }
-    settings.uiLayoutOrder = lbgNormalizeLayoutOrder(settings.uiLayoutOrder);
 }
 
 function lbgClampNumber(value, min, max, fallback) {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return Math.min(max, Math.max(min, number));
-}
-
-function lbgNormalizeLayoutOrder(order) {
-    const seen = new Set();
-    const normalized = [];
-    for (const key of order || []) {
-        if (!LBG_DEFAULT_LAYOUT_ORDER.includes(key) || seen.has(key)) continue;
-        seen.add(key);
-        normalized.push(key);
-    }
-    for (const key of LBG_DEFAULT_LAYOUT_ORDER) {
-        if (!seen.has(key)) normalized.push(key);
-    }
-    return normalized;
 }
 
 function lbgGetLayoutOrder(settings) {
@@ -1655,22 +1472,13 @@ function lbgNormalizeGroupName(value) {
 }
 
 function lbgGetEntryGroups(settings, entry) {
-    lbgEnsureAdvancedFeatureSettings(settings);
     const id = lbgEntryMetaId(entry);
-    return toStringArray(settings.entryGroups[id])
-        .map(lbgNormalizeGroupName)
-        .filter(Boolean)
-        .filter((group, index, groups) => groups.indexOf(group) === index);
+    return toStringArray(settings.entryGroups[id]).map(lbgNormalizeGroupName).filter(Boolean);
 }
 
 function lbgSetEntryGroups(settings, entry, groups) {
-    lbgEnsureAdvancedFeatureSettings(settings);
     const id = lbgEntryMetaId(entry);
-    const cleanGroups = toStringArray(groups)
-        .map(lbgNormalizeGroupName)
-        .filter(Boolean)
-        .filter((group, index, all) => all.indexOf(group) === index);
-
+    const cleanGroups = toStringArray(groups).map(lbgNormalizeGroupName).filter(Boolean);
     if (cleanGroups.length) settings.entryGroups[id] = cleanGroups;
     else delete settings.entryGroups[id];
 
@@ -1696,160 +1504,93 @@ function lbgRemoveEntryGroup(settings, entry, groupName) {
 }
 
 function lbgGetAllGroups(settings) {
-    lbgEnsureAdvancedFeatureSettings(settings);
-    const groups = new Set();
-    for (const group of settings.groupOrder) {
-        const normalized = lbgNormalizeGroupName(group);
-        if (normalized) groups.add(normalized);
-    }
-    for (const values of Object.values(settings.entryGroups)) {
+    const groups = new Set(settings.groupOrder);
+    for (const values of Object.values(settings.entryGroups || {})) {
         for (const group of toStringArray(values)) {
             const normalized = lbgNormalizeGroupName(group);
             if (normalized) groups.add(normalized);
         }
     }
-    settings.groupOrder = [...groups];
-    return [...groups];
+    return [...groups].filter(Boolean);
 }
 
 function lbgCreateGroupChip(groupName, removable, onRemove) {
-    const chip = el('span', `lbg-group-chip ${removable ? 'is-removable' : ''}`);
+    const chip = el('span', `lbg-group-chip`);
+    chip.style = "background: rgba(105, 145, 255, 0.15); border: 1px solid rgba(130, 170, 255, 0.4); padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-right: 4px; display: inline-flex; align-items: center;";
     chip.textContent = `Group: ${groupName}`;
     if (removable && typeof onRemove === 'function') {
-        const remove = button('×', 'lbg-group-remove-button');
-        remove.type = 'button';
-        remove.title = 'Remove from group';
-        remove.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onRemove();
-        });
+        const remove = button('×', 'lbg-tag-remove');
+        remove.style = "background:none; border:none; margin-left: 4px; color:red; cursor:pointer;";
+        remove.addEventListener('click', (e) => { e.stopPropagation(); onRemove(); });
         chip.appendChild(remove);
     }
     return chip;
 }
 
-function lbgCreateNotice(textValue) {
-    if (typeof createNoticeElement === 'function') return createNoticeElement(textValue);
-    const notice = el('div', 'lbg-muted');
-    notice.textContent = textValue;
-    return notice;
-}
-
 function lbgCreateGroupControls(entry, state) {
-    lbgEnsureAdvancedFeatureSettings(state.settings);
-
     const wrapper = el('div', 'lbg-group-menu-section');
+    wrapper.style = "margin-top: 10px; border-top: 1px solid #333; padding-top: 8px;";
     const title = el('div', 'lbg-menu-section-title');
-    title.textContent = 'Groups';
+    title.textContent = 'Groups Management';
 
     const current = el('div', 'lbg-current-group-list');
     const currentGroups = lbgGetEntryGroups(state.settings, entry);
     if (!currentGroups.length) {
-        current.appendChild(lbgCreateNotice('No groups assigned.'));
+        const empty = el('div'); empty.style = "font-size:11px; color:#666;"; empty.textContent = "No groups assigned";
+        current.appendChild(empty);
     } else {
         for (const group of currentGroups) {
             current.appendChild(lbgCreateGroupChip(group, true, () => {
                 lbgRemoveEntryGroup(state.settings, entry, group);
                 persistState(state);
-                markDirty(state, 'entries');
                 renderRoot(state);
             }));
         }
     }
 
-    const allGroups = lbgGetAllGroups(state.settings).filter((group) => !currentGroups.includes(group));
-    const existingTitle = el('div', 'lbg-menu-section-title lbg-menu-section-subtitle');
-    existingTitle.textContent = 'Add existing group';
-
-    const grid = el('div', 'lbg-menu-group-grid');
-    if (!allGroups.length) {
-        grid.appendChild(lbgCreateNotice('No saved groups yet.'));
-    } else {
-        for (const group of allGroups) {
-            const addButton = button(group, 'lbg-menu-group-button');
-            addButton.addEventListener('click', () => {
-                lbgAddEntryGroup(state.settings, entry, group);
-                persistState(state);
-                markDirty(state, 'entries');
-                renderRoot(state);
-            });
-            grid.appendChild(addButton);
-        }
-    }
-
     const customRow = el('div', 'lbg-menu-custom-row');
-    const input = el('input', 'text_pole lbg-menu-custom-input');
-    input.placeholder = 'New group';
-    const add = button('Add group', 'lbg-small-button');
-    const commit = () => {
-        if (!lbgAddEntryGroup(state.settings, entry, input.value)) return;
-        input.value = '';
-        persistState(state);
-        markDirty(state, 'entries');
-        renderRoot(state);
-    };
-    add.addEventListener('click', commit);
-    input.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            commit();
+    customRow.style = "display:flex; gap: 4px; margin-top:6px;";
+    const input = el('input', 'text_pole');
+    input.placeholder = 'Add to group name...';
+    const add = button('Add', 'lbg-small-button');
+    add.addEventListener('click', () => {
+        if (lbgAddEntryGroup(state.settings, entry, input.value)) {
+            persistState(state);
+            renderRoot(state);
         }
     });
     customRow.append(input, add);
-
-    wrapper.append(title, current, existingTitle, grid, customRow);
+    wrapper.append(title, current, customRow);
     return wrapper;
 }
 
 function lbgRenderGroupFilter(state) {
-    lbgEnsureAdvancedFeatureSettings(state.settings);
-
     const select = el('select', 'text_pole lbg-group-filter-select');
-    select.title = 'Filter by group';
-
-    const allOption = document.createElement('option');
-    allOption.value = LBG_GROUP_FILTER_ALL;
-    allOption.textContent = 'All groups';
-    select.appendChild(allOption);
-
-    const ungroupedOption = document.createElement('option');
-    ungroupedOption.value = LBG_GROUP_FILTER_UNGROUPED;
-    ungroupedOption.textContent = 'No group';
-    select.appendChild(ungroupedOption);
+    select.appendChild(createOption(LBG_GROUP_FILTER_ALL, '📁 All Groups'));
+    select.appendChild(createOption(LBG_GROUP_FILTER_UNGROUPED, '❌ Ungrouped'));
 
     for (const group of lbgGetAllGroups(state.settings)) {
-        const option = document.createElement('option');
-        option.value = group;
-        option.textContent = `Group: ${group}`;
-        select.appendChild(option);
+        select.appendChild(createOption(group, `📁 ${group}`));
     }
-
     select.value = state.settings.groupFilter || LBG_GROUP_FILTER_ALL;
-    if (![...select.options].some((option) => option.value === select.value)) {
-        select.value = LBG_GROUP_FILTER_ALL;
-        state.settings.groupFilter = LBG_GROUP_FILTER_ALL;
-    }
-
     select.addEventListener('change', () => {
         state.settings.groupFilter = select.value;
         persistState(state);
         renderRoot(state);
     });
-
     return select;
 }
 
 function lbgRenderSearchScopeControls(state) {
-    lbgEnsureAdvancedFeatureSettings(state.settings);
-
     const wrapper = el('div', 'lbg-search-scope-row');
+    wrapper.style = "display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: #aaa;";
     const label = el('span', 'lbg-search-scope-title');
-    label.textContent = 'Search in:';
+    label.innerHTML = '<strong>Search target scope:</strong>';
     wrapper.appendChild(label);
 
     for (const scope of LBG_DEFAULT_SEARCH_SCOPES) {
-        const scopeLabel = el('label', 'lbg-search-scope-item');
+        const scopeLabel = el('label');
+        scopeLabel.style = "display:flex; align-items:center; gap: 4px; cursor:pointer;";
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = state.settings.searchScopes.includes(scope);
@@ -1858,308 +1599,153 @@ function lbgRenderSearchScopeControls(state) {
             if (input.checked) selected.add(scope);
             else selected.delete(scope);
 
-            if (!selected.size) {
-                selected.add(scope);
-                input.checked = true;
-            }
-
-            state.settings.searchScopes = [...selected].filter((item) => LBG_DEFAULT_SEARCH_SCOPES.includes(item));
+            if (selected.size === 0) { selected.add(scope); input.checked = true; }
+            state.settings.searchScopes = [...selected];
             persistState(state);
-            lbgRenderRootKeepingSearchFocus(state, state.root?.querySelector('#lbgSearch'));
+            renderRoot(state);
         });
-        scopeLabel.append(input, document.createTextNode(LBG_SEARCH_SCOPE_LABELS[scope] || scope));
+        scopeLabel.append(input, document.createTextNode(LBG_SEARCH_SCOPE_LABELS[scope]));
         wrapper.appendChild(scopeLabel);
     }
-
     return wrapper;
 }
 
 function lbgRenderUiCustomizationPanel(state) {
-    lbgEnsureAdvancedFeatureSettings(state.settings);
-
     const details = el('details', 'lbg-ui-customizer');
-    const summary = el('summary', 'lbg-ui-customizer-summary');
-    summary.textContent = 'Interface settings';
+    details.style = "margin-top:8px; border: 1px solid #333; padding: 6px; border-radius:6px; background: rgba(0,0,0,0.2);";
+    const summary = el('summary');
+    summary.textContent = '⚙️ Advanced Interface Sizing';
+    summary.style = "cursor:pointer; font-size:12px; font-weight:bold;";
     details.appendChild(summary);
 
     const body = el('div', 'lbg-ui-customizer-body');
+    body.style = "display:flex; flex-direction:column; gap:6px; margin-top:6px;";
     const ui = state.settings.uiCustomization;
 
     body.append(
-        lbgCreateRangeControl('Text size', ui.fontScale, 0.75, 1.35, 0.05, (value) => {
-            ui.fontScale = value;
-            persistState(state);
-            lbgApplyUiCustomization(state);
-        }),
-        lbgCreateRangeControl('Button size', ui.buttonScale, 0.75, 1.6, 0.05, (value) => {
-            ui.buttonScale = value;
-            persistState(state);
-            lbgApplyUiCustomization(state);
-        }),
-        lbgCreateRangeControl('Entry spacing', ui.entryDensity, 0.6, 1.5, 0.05, (value) => {
-            ui.entryDensity = value;
-            persistState(state);
-            lbgApplyUiCustomization(state);
-        }),
-        lbgCreateRangeControl('Entry width', ui.entryWidth, 55, 100, 1, (value) => {
-            ui.entryWidth = value;
-            persistState(state);
-            lbgApplyUiCustomization(state);
-        }, '%'),
-        lbgCreateRangeControl('Window width', ui.panelWidth, 620, 1600, 20, (value) => {
-            ui.panelWidth = value;
-            persistState(state);
-            lbgApplyUiCustomization(state);
-        }, 'px')
+        lbgCreateRangeControl('Font Scale', ui.fontScale, 0.75, 1.35, 0.05, (val) => { ui.fontScale = val; persistState(state); lbgApplyUiCustomization(state); }),
+        lbgCreateRangeControl('Buttons Scale', ui.buttonScale, 0.75, 1.6, 0.05, (val) => { ui.buttonScale = val; persistState(state); lbgApplyUiCustomization(state); }),
+        lbgCreateRangeControl('Card Density', ui.entryDensity, 0.6, 1.5, 0.05, (val) => { ui.entryDensity = val; persistState(state); lbgApplyUiCustomization(state); }),
+        lbgCreateRangeControl('Entry Width (%)', ui.entryWidth, 55, 100, 1, (val) => { ui.entryWidth = val; persistState(state); lbgApplyUiCustomization(state); }),
+        lbgCreateRangeControl('Window Width (px)', ui.panelWidth, 620, 1600, 20, (val) => { ui.panelWidth = val; persistState(state); lbgApplyUiCustomization(state); })
     );
-
-    const reset = button('Reset interface', 'lbg-small-button lbg-ui-reset-button');
-    reset.addEventListener('click', () => {
-        delete state.settings.uiCustomization;
-        delete state.settings.uiLayoutOrder;
-        lbgEnsureAdvancedFeatureSettings(state.settings);
-        persistState(state);
-        renderRoot(state);
-    });
-    body.appendChild(reset);
 
     details.appendChild(body);
     return details;
 }
 
-function lbgCreateRangeControl(labelText, value, min, max, step, onChange, suffix = '') {
-    const row = el('label', 'lbg-ui-range-row');
-    const label = el('span', 'lbg-ui-range-label');
-    const current = el('span', 'lbg-ui-range-value');
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.step = String(step);
-    slider.value = String(value);
-
-    const updateCurrent = () => {
-        const numeric = Number(slider.value);
-        current.textContent = `${Number.isInteger(numeric) ? numeric : numeric.toFixed(2)}${suffix}`;
-    };
-    updateCurrent();
-
-    slider.addEventListener('input', () => {
-        const numeric = Number(slider.value);
-        updateCurrent();
-        if (Number.isFinite(numeric)) onChange(numeric);
-    });
-
-    label.textContent = labelText;
-    row.append(label, slider, current);
-    return row;
+function lbgCreateRangeControl(label, val, min, max, step, onChange) {
+    const r = el('div'); r.style = "display:grid; grid-template-columns: 120px 1fr 40px; align-items:center; font-size:11px;";
+    const l = el('span'); l.textContent = label;
+    const v = el('span'); v.textContent = val; v.style = "text-align:right;";
+    const slider = document.createElement('input'); slider.type = 'range'; slider.min = min; slider.max = max; slider.step = step; slider.value = val;
+    slider.addEventListener('input', () => { v.textContent = slider.value; onChange(Number(slider.value)); });
+    r.append(l, slider, v);
+    return r;
 }
 
 function lbgApplyUiCustomization(state) {
-    lbgEnsureAdvancedFeatureSettings(state.settings);
     const shell = state.root?.querySelector('.lbg-root');
     if (!shell) return;
-
     const ui = state.settings.uiCustomization;
-    shell.style.setProperty('--lbg-ui-font-scale', String(ui.fontScale));
-    shell.style.setProperty('--lbg-ui-button-scale', String(ui.buttonScale));
-    shell.style.setProperty('--lbg-entry-density', String(ui.entryDensity));
+    shell.style.setProperty('--lbg-ui-font-scale', ui.fontScale);
+    shell.style.setProperty('--lbg-ui-button-scale', ui.buttonScale);
+    shell.style.setProperty('--lbg-entry-density', ui.entryDensity);
     shell.style.setProperty('--lbg-entry-width', `${ui.entryWidth}%`);
     shell.style.setProperty('--lbg-panel-width', `${ui.panelWidth}px`);
 
     const panel = state.root?.closest('.lbg-mobile-panel, .lbg-desktop-panel');
-    if (panel) {
-        panel.style.setProperty('--lbg-panel-width', `${ui.panelWidth}px`);
-    }
+    if (panel) panel.style.setProperty('width', `${ui.panelWidth}px`);
 }
 
 function lbgRenderRootKeepingSearchFocus(state, input) {
-    const value = String(input?.value || state.searchQuery || '');
-    state.lbgSearchFocus = {
-        start: Number.isFinite(input?.selectionStart) ? input.selectionStart : value.length,
-        end: Number.isFinite(input?.selectionEnd) ? input.selectionEnd : value.length,
-        scrollTop: Number(state.root?.scrollTop || 0),
-    };
+    if (input) {
+        state.lbgSearchFocus = {
+            start: input.selectionStart,
+            end: input.selectionEnd,
+            scrollTop: state.root ? state.root.scrollTop : 0
+        };
+    }
     renderRoot(state);
 }
 
 function lbgRestoreSearchFocus(state) {
+    if (!state.lbgSearchFocus) return;
     const focusState = state.lbgSearchFocus;
-    if (!focusState) return;
     state.lbgSearchFocus = null;
 
     requestAnimationFrame(() => {
-        if (state.root && Number.isFinite(focusState.scrollTop)) {
-            state.root.scrollTop = focusState.scrollTop;
-        }
-
-        const search = state.root?.querySelector('#lbgSearch');
+        if (state.root && focusState.scrollTop) state.root.scrollTop = focusState.scrollTop;
+        const search = document.getElementById('lbgSearch');
         if (!search) return;
-        const length = String(search.value || '').length;
-        const start = Math.min(focusState.start ?? length, length);
-        const end = Math.min(focusState.end ?? start, length);
-        try {
-            search.focus({ preventScroll: true });
-            search.setSelectionRange(start, end);
-        } catch (_) {
-            search.focus();
-        }
+        search.focus();
+        try { search.setSelectionRange(focusState.start, focusState.end); } catch (e) {}
     });
 }
 
 function lbgMakeLayoutDraggable(node, key, state) {
-    if (!node || !key) return node;
+    if (!node) return node;
     node.classList.add('lbg-layout-draggable');
-    node.dataset.lbgLayoutKey = key;
-
+    
     const handle = el('div', 'lbg-drag-handle');
-    handle.textContent = '↕ Drag section';
-    handle.title = 'Drag to reorder interface sections';
+    handle.textContent = '↕ Drag to reorder section layout';
+    handle.style = "background:#222; font-size:10px; padding:2px 6px; text-align:center; color:#777; cursor:grab; border-radius:4px; border:1px dashed #444; margin-bottom:4px;";
     handle.draggable = true;
-    node.insertBefore(handle, node.firstChild);
 
-    handle.addEventListener('dragstart', (event) => {
-        event.dataTransfer?.setData('text/plain', key);
-        node.classList.add('is-dragging');
+    handle.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', key);
+        node.style.opacity = '0.4';
     });
-    handle.addEventListener('dragend', () => {
-        node.classList.remove('is-dragging');
-    });
-    node.addEventListener('dragover', (event) => {
-        event.preventDefault();
-    });
-    node.addEventListener('drop', (event) => {
-        event.preventDefault();
-        const sourceKey = event.dataTransfer?.getData('text/plain');
+    handle.addEventListener('dragend', () => { node.style.opacity = '1'; });
+    node.addEventListener('dragover', (e) => e.preventDefault());
+    node.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const sourceKey = e.dataTransfer.getData('text/plain');
         if (!sourceKey || sourceKey === key) return;
 
-        const order = lbgGetLayoutOrder(state.settings);
-        const from = order.indexOf(sourceKey);
-        const to = order.indexOf(key);
-        if (from === -1 || to === -1) return;
-
-        order.splice(to, 0, order.splice(from, 1)[0]);
-        state.settings.uiLayoutOrder = lbgNormalizeLayoutOrder(order);
-        persistState(state);
-        renderRoot(state);
+        const order = state.settings.uiLayoutOrder;
+        const fromIdx = order.indexOf(sourceKey);
+        const toIdx = order.indexOf(key);
+        if (fromIdx !== -1 && toIdx !== -1) {
+            order.splice(toIdx, 0, order.splice(fromIdx, 1)[0]);
+            persistState(state);
+            renderRoot(state);
+        }
     });
 
+    node.insertBefore(handle, node.firstChild);
     return node;
 }
 
-function lbgNormalizeSearchValue(value) {
-    return String(value || '').toLowerCase().trim();
-}
-
-function lbgEntryTextForScope(entry, state, scope) {
-    if (scope === 'title') {
-        return [entry?.title, entry?.name].filter(Boolean).join(' ');
-    }
-    if (scope === 'tags') {
-        return getEntryTags(state.settings, entry).join(' ');
-    }
-    if (scope === 'keys') {
-        const values = [
-            entry?.keys,
-            entry?.key,
-            entry?.secondaryKeys,
-            entry?.keysecondary,
-            entry?.matchedKeys,
-            entry?.matchedKeywords,
-        ];
-        if (typeof buildKeysText === 'function') values.push(buildKeysText(entry));
-        return values.map((value) => Array.isArray(value) ? value.join(' ') : String(value || '')).join(' ');
-    }
-    if (scope === 'context') {
-        const values = [entry?.content, entry?.text, entry?.comment, entry?.description];
-        if (typeof getEntryPromptContent === 'function') values.push(getEntryPromptContent(entry));
-        return values.map((value) => String(value || '')).join(' ');
-    }
-    return '';
-}
-
 function lbgEntryMatchesSearch(entry, state) {
-    const query = lbgNormalizeSearchValue(state.searchQuery);
+    const query = String(state.searchQuery || '').toLowerCase().trim();
     if (!query) return true;
 
-    lbgEnsureAdvancedFeatureSettings(state.settings);
     return state.settings.searchScopes.some((scope) => {
-        const source = lbgNormalizeSearchValue(lbgEntryTextForScope(entry, state, scope));
-        return source.includes(query);
+        if (scope === 'title') return String(entry.title || '').toLowerCase().includes(query);
+        if (scope === 'tags') return getEntryTags(state.settings, entry).join(' ').toLowerCase().includes(query);
+        if (scope === 'keys') return [...toStringArray(entry.keys), ...toStringArray(entry.secondaryKeys)].join(' ').toLowerCase().includes(query);
+        if (scope === 'context') return String(entry.content || '').toLowerCase().includes(query);
+        return false;
     });
 }
 
-function lbgEntryMatchesTags(entry, state) {
-    if (!state.selectedManagerTags || !state.selectedManagerTags.size) return true;
-    const tags = new Set(getEntryTags(state.settings, entry));
-    const selected = [...state.selectedManagerTags];
-    if ((state.settings.tagFilterMode || 'any') === 'all') {
-        return selected.every((tag) => tags.has(tag));
-    }
-    return selected.some((tag) => tags.has(tag));
-}
-
-function lbgEntryMatchesGroup(entry, state) {
-    lbgEnsureAdvancedFeatureSettings(state.settings);
-    const filter = state.settings.groupFilter || LBG_GROUP_FILTER_ALL;
-    if (!filter || filter === LBG_GROUP_FILTER_ALL) return true;
-
-    const groups = lbgGetEntryGroups(state.settings, entry);
-    if (filter === LBG_GROUP_FILTER_UNGROUPED) return groups.length === 0;
-    return groups.includes(filter);
-}
-
 function lbgFilterEntriesForReview(entries, state) {
-    return [...entries].filter((entry) => (
-        lbgEntryMatchesSearch(entry, state)
-        && lbgEntryMatchesTags(entry, state)
-        && lbgEntryMatchesGroup(entry, state)
-    ));
+    return entries.filter((entry) => {
+        const matchesSearch = lbgEntryMatchesSearch(entry, state);
+        
+        // Фильтрация по Группам
+        const filter = state.settings.groupFilter || LBG_GROUP_FILTER_ALL;
+        let matchesGroup = true;
+        const groups = lbgGetEntryGroups(state.settings, entry);
+        if (filter === LBG_GROUP_FILTER_UNGROUPED) matchesGroup = (groups.length === 0);
+        else if (filter !== LBG_GROUP_FILTER_ALL) matchesGroup = groups.includes(filter);
+
+        return matchesSearch && matchesGroup;
+    });
 }
 
-function lbgFilterInactiveEntriesByBook(entries, bookFilter) {
-    if (!bookFilter || bookFilter === ALL_LOREBOOKS_FILTER) return entries;
-    return entries.filter((entry) => entry.bookName === bookFilter);
-}
-
-function lbgCompareText(a, b) {
-    return String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
-}
-
-function lbgCompareEntries(a, b, mode, state) {
-    const favoriteDiff = Number(isFavorite(state.settings, b)) - Number(isFavorite(state.settings, a));
-    if (favoriteDiff) return favoriteDiff;
-
-    if (mode === 'tokens_asc') return (a.tokens || 0) - (b.tokens || 0) || lbgCompareText(a.title, b.title);
-    if (mode === 'tokens_desc') return (b.tokens || 0) - (a.tokens || 0) || lbgCompareText(a.title, b.title);
-    if (mode === 'book') return lbgCompareText(a.bookName, b.bookName) || lbgCompareText(a.title, b.title);
-    if (mode === 'title') return lbgCompareText(a.title, b.title) || lbgCompareText(a.bookName, b.bookName);
-    return 0;
-}
-
-function lbgSortEntries(entries, mode, state) {
-    return entries
-        .map((entry, index) => ({ entry, index }))
-        .sort((left, right) => lbgCompareEntries(left.entry, right.entry, mode, state) || left.index - right.index)
-        .map((item) => item.entry);
-}
-
-function lbgSortInactiveEntries(entries, mode, state) {
-    const preferredBooks = new Set(toStringArray(state.settings.preferredInactiveBookNames));
-    return entries
-        .map((entry, index) => ({ entry, index }))
-        .sort((left, right) => {
-            const leftPreferred = preferredBooks.has(left.entry.bookName) ? 0 : 1;
-            const rightPreferred = preferredBooks.has(right.entry.bookName) ? 0 : 1;
-            return leftPreferred - rightPreferred
-                || lbgCompareEntries(left.entry, right.entry, mode, state)
-                || left.index - right.index;
-        })
-        .map((item) => item.entry);
-}
-
-function lbgIsUnlinkedConstantActiveEntry(entry) {
-    return entry?.matchType === 'unlinked-constant';
-}
-
-// LBG_FUNCTIONAL_FEATURES_END
+function lbgIsUnlinkedConstantActiveEntry(entry) { return entry?.matchType === 'unlinked-constant'; }
+function lbgSortEntries(entries, mode, state) { return sortEntries(entries, mode, state); }
+function lbgSortInactiveEntries(entries, mode, state) { return sortInactiveEntries(entries, mode, state); }
+function lbgFilterInactiveEntriesByBook(entries, bookFilter) { return filterInactiveEntriesByBook(entries, bookFilter); }

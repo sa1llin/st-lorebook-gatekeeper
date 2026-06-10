@@ -22,6 +22,20 @@ export const defaultSettings = {
     },
     favoritesMode: 'pin',
     compactView: false,
+    
+    // Новые настройки кастомизации и групп
+    searchScopes: ['title', 'tags', 'keys', 'context'],
+    entryGroups: {},
+    groupOrder: [],
+    groupFilter: '__all__',
+    uiCustomization: {
+        fontScale: 1.0,
+        buttonScale: 1.0,
+        entryDensity: 1.0,
+        entryWidth: 100,
+        panelWidth: 980
+    },
+    uiLayoutOrder: ['search', 'tags', 'controls', 'memory', 'active', 'inactive']
 };
 
 export function getSettings() {
@@ -63,58 +77,59 @@ function normalizeSettings(settings) {
         mode: normalized.tagFilter?.mode === 'and' ? 'and' : 'or',
     };
 
+    // Нормализация поисковых областей и UI
+    if (!Array.isArray(normalized.searchScopes) || !normalized.searchScopes.length) {
+        normalized.searchScopes = ['title', 'tags', 'keys', 'context'];
+    }
+    if (!normalized.entryGroups || typeof normalized.entryGroups !== 'object') {
+        normalized.entryGroups = {};
+    }
+    if (!Array.isArray(normalized.groupOrder)) normalized.groupOrder = [];
+    if (typeof normalized.groupFilter !== 'string') normalized.groupFilter = '__all__';
+
     return normalized;
 }
 
 function normalizeBooleanMap(value) {
     const result = {};
     if (!value || typeof value !== 'object') return result;
-
     for (const [key, enabled] of Object.entries(value)) {
         if (key && enabled) result[String(key)] = true;
     }
-
     return result;
 }
 
 function normalizeEntryTags(value) {
     const result = {};
     if (!value || typeof value !== 'object') return result;
-
     for (const [entryId, tags] of Object.entries(value)) {
         const normalizedTags = [...new Set(toStringArray(tags).map(normalizeTagName).filter(Boolean))];
         if (entryId && normalizedTags.length) result[String(entryId)] = normalizedTags;
     }
-
     return result;
 }
 
 function normalizeCustomTags(value) {
     const result = {};
     if (!value || typeof value !== 'object') return result;
-
     for (const [key, tag] of Object.entries(value)) {
         const name = normalizeTagName(tag?.name || key);
         if (!name) continue;
-
         result[name] = {
             name,
             label: String(tag?.label || formatTagLabel(name)),
             createdAt: Number(tag?.createdAt || Date.now()),
         };
     }
-
     return result;
 }
 
 function normalizeStringMap(value) {
     const result = {};
     if (!value || typeof value !== 'object') return result;
-
     for (const [key, mapValue] of Object.entries(value)) {
         if (key && mapValue) result[String(key)] = String(mapValue);
     }
-
     return result;
 }
 
