@@ -1515,3 +1515,56 @@ body.lbg-edit-open {
     border-radius: 8px;
     background: rgba(255,255,255,0.01);
 }
+
+/* Глобальное уменьшение шрифта для всего текста, кнопок и полей */
+.lbg-root, 
+.lbg-upgraded-root, 
+.lbg-root button, 
+.lbg-root .menu_button, 
+.lbg-root input, 
+.lbg-root select,
+.lbg-root textarea {
+    font-size: calc(11.5px * var(--lbg-ui-font-scale, 1)) !important;
+}
+
+/* Стилизация чекбоксов: делаем их меньше и квадратнее */
+.lbg-root input[type="checkbox"] {
+    width: 13px !important;
+    min-width: 13px !important;
+    height: 13px !important;
+    border-radius: 0px !important; /* Полностью квадратные углы */
+    border: 1px solid #555555 !important;
+    background: #0a0a0a !important;
+}
+
+/* Корректировка отображения галочки внутри уменьшенного чекбокса */
+.lbg-root input[type="checkbox"]:checked::after {
+    font-size: 10px !important;
+    font-weight: 900 !important;
+    transform: translateY(-3px) !important;
+}
+
+/* Центрирование и уменьшение модального окна редактирования записи */
+.lbg-edit-overlay {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 20px !important;
+}
+
+.lbg-edit-modal {
+    position: relative !important;
+    width: min(560px, calc(100vw - 24px)) !important; /* Уменьшенная ширина */
+    height: min(42dvh, 380px) !important;            /* Уменьшенная высота */
+    min-height: 280px !important;
+    max-height: 85dvh !important;
+    margin: auto !important;                          /* Строгое центрирование */
+    border-radius: 10px !important;                   /* Более аккуратные закругления */
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75) !important;
+}
+
+/* Оптимизация внутренних отступов редактора */
+.lbg-edit-textarea {
+    padding: 10px !important;
+    font-size: 11px !important;
+}

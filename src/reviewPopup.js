@@ -316,16 +316,34 @@ function renderSearchPanel(state) {
     lbgEnsureAdvancedFeatureSettings(state.settings);
 
     const panel = el('div', 'lbg-toolbar lbg-panel-block lbg-search-panel');
+    panel.style.display = "flex";
+    panel.style.flexDirection = "column";
+    panel.style.gap = "8px";
+
+    // Строка 1: Длинное поле поиска на всю ширину
+    const searchRow = el('div', 'lbg-search-top-row');
+    searchRow.style.width = "100%";
 
     const search = el('input', 'text_pole');
     search.id = 'lbgSearch';
     search.type = 'search';
     search.placeholder = 'Search entries by scope selection...';
     search.value = state.searchQuery || '';
+    search.style.width = "100%"; 
+    
+    // Живое обновление списков без деструкции инпута (решает проблему с клавиатурой)
     search.addEventListener('input', () => {
         state.searchQuery = search.value;
-        lbgRenderRootKeepingSearchFocus(state, search);
+        lbgRefreshEntriesListOnly(state);
     });
+    searchRow.appendChild(search);
+
+    // Строка 2: Все управляющие кнопки и селекторы под полем поиска
+    const controlsRow = el('div', 'lbg-search-controls-row');
+    controlsRow.style.display = "grid";
+    controlsRow.style.gridTemplateColumns = "repeat(auto-fit, minmax(130px, 1fr))";
+    controlsRow.style.gap = "8px";
+    controlsRow.style.width = "100%";
 
     const sort = el('select', 'text_pole');
     sort.innerHTML = `
@@ -353,11 +371,11 @@ function renderSearchPanel(state) {
         renderRoot(state);
     });
 
-    const firstRow = el('div', 'lbg-search-row');
-    firstRow.append(search, sort, view, lbgRenderGroupFilter(state));
+    controlsRow.append(sort, view, lbgRenderGroupFilter(state));
 
     panel.append(
-        firstRow,
+        searchRow,
+        controlsRow,
         lbgRenderSearchScopeControls(state),
         lbgRenderUiCustomizationPanel(state)
     );
@@ -766,7 +784,10 @@ function renderEntriesSection(state, active) {
     const header = el('div', 'lbg-section-header');
     const title = el('h4');
     title.textContent = active ? 'Activated entries' : 'Inactive entries';
+    
+    // Добавляем ID для динамического обновления счётчика
     const count = el('span');
+    count.id = active ? 'lbgActiveVisibleCount' : 'lbgInactiveVisibleCount';
 
     let entries = active ? getVisibleActiveEntries(state) : getVisibleInactiveEntries(state);
     count.innerHTML = `<strong>${entries.length}</strong> visible`;
@@ -780,13 +801,16 @@ function renderEntriesSection(state, active) {
         if (!state.settings.showInactiveEntries) return section;
     }
 
+    // Добавляем фиксированные ID спискам, чтобы обновлять только их детей
     const list = el('div', 'lbg-list');
+    list.id = active ? 'lbgActiveEntriesList' : 'lbgInactiveEntriesList';
+
     const renderedEntries = active ? entries : entries.slice(0, MAX_RENDERED_ENTRIES);
     if (!renderedEntries.length) list.appendChild(createNoticeElement('No entries found matching filters.'));
     else renderedEntries.forEach((entry) => list.appendChild(createEntryElement(entry, state)));
 
     if (!active && entries.length > MAX_RENDERED_ENTRIES) {
-        list.appendChild(createNoticeElement(`Showing ${MAX_RENDERED_ENTRIES} of ${entries.length} inactive entries. Use search to narrow the list.`));
+        list.appendChild(createNoticeElement(`Showing ${MAX_RENDERED_ENTRIES} of ${entries.length} inactive entries.`));
     }
 
     section.appendChild(list);
@@ -1761,4 +1785,37 @@ function filterInactiveEntriesByBook(entries, selectedBookName) {
 
 function lbgCompareText(a, b) {
     return String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
+}
+
+// Новая функция для изоляции процесса фильтрации (сохраняет фокус и клавиатуру)
+function lbgRefreshEntriesListOnly(state) {
+    // 1. Обновляем активные записи
+    const activeList = document.getElementById('lbgActiveEntriesList');
+    const activeCount = document.getElementById('lbgActiveVisibleCount');
+    if (activeList) {
+        activeList.innerHTML = '';
+        const entries = getVisibleActiveEntries(state);
+        if (activeCount) activeCount.innerHTML = `<strong>${entries.length}</strong> visible`;
+        if (!entries.length) activeList.appendChild(createNoticeElement('No entries found matching filters.'));
+        else entries.forEach((entry) => activeList.appendChild(createEntryElement(entry, state)));
+    }
+    
+    // 2. Обновляем неактивные записи
+    const inactiveList = document.getElementById('lbgInactiveEntriesList');
+    const inactiveCount = document.getElementById('lbgInactiveVisibleCount');
+    if (inactiveList) {
+        inactiveList.innerHTML = '';
+        const entries = getVisibleInactiveEntries(state);
+        if (inactiveCount) inactiveCount.innerHTML = `<strong>${entries.length}</strong> visible`;
+        const renderedEntries = entries.slice(0, MAX_RENDERED_ENTRIES);
+        if (!renderedEntries.length) inactiveList.appendChild(createNoticeElement('No entries found matching filters.'));
+        else renderedEntries.forEach((entry) => inactiveList.appendChild(createEntryElement(entry, state)));
+    }
+    
+    // 3. Мягко обновляем блок статистики в шапке
+    const statsGrid = document.querySelector('.lbg-stats-grid');
+    if (statsGrid) {
+        const newStats = renderStats(state);
+        statsGrid.replaceWith(newStats);
+    }
 }
