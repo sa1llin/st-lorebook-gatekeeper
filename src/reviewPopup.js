@@ -1748,4 +1748,17 @@ function lbgFilterEntriesForReview(entries, state) {
 function lbgIsUnlinkedConstantActiveEntry(entry) { return entry?.matchType === 'unlinked-constant'; }
 function lbgSortEntries(entries, mode, state) { return sortEntries(entries, mode, state); }
 function lbgSortInactiveEntries(entries, mode, state) { return sortInactiveEntries(entries, mode, state); }
-function lbgFilterInactiveEntriesByBook(entries, bookFilter) { return filterInactiveEntriesByBook(entries, bookFilter); }
+function lbgFilterInactiveEntriesByBook(entries, bookFilter) {
+    if (!bookFilter || bookFilter === ALL_LOREBOOKS_FILTER) return entries;
+    return entries.filter((entry) => entry.bookName === bookFilter);
+}
+
+// Добавьте эту оригинальную функцию, которую вызывает ваш код:
+function filterInactiveEntriesByBook(entries, selectedBookName) {
+    if (!selectedBookName || selectedBookName === ALL_LOREBOOKS_FILTER) return entries;
+    return entries.filter((entry) => entry.bookName === selectedBookName);
+}
+
+function lbgCompareText(a, b) {
+    return String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
+}
