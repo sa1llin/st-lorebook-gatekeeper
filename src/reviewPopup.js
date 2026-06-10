@@ -70,6 +70,7 @@ export async function showLorebookReviewPopup({ activeEntries, inactiveEntries, 
 function ensureUpgradeSettings(settings) {
     if (!Array.isArray(settings.tagOrder)) settings.tagOrder = [];
     if (!settings.scenarioUi || typeof settings.scenarioUi !== 'object') settings.scenarioUi = {};
+    lbgEnsureAdvancedFeatureSettings(settings);
 }
 
 function createStateEntry(entry, selected, originallyActive, settings) {
@@ -171,8 +172,9 @@ function buildConfirmedResult(state) {
 }
 
 function buildPersistentRuleResult(state) {
-    const selectedActiveEntries = state.activeEntries.filter((entry) => !isBlocked(state.settings, entry));
-    const disabledEntries = state.activeEntries.filter((entry) => isBlocked(state.settings, entry));
+    const shouldForceDisable = (entry) => lbgIsUnlinkedConstantActiveEntry(entry) && !isLocked(state.settings, entry);
+    const selectedActiveEntries = state.activeEntries.filter((entry) => !isBlocked(state.settings, entry) && !shouldForceDisable(entry));
+    const disabledEntries = state.activeEntries.filter((entry) => isBlocked(state.settings, entry) || shouldForceDisable(entry));
     const manualEntries = state.inactiveEntries.filter((entry) => isLocked(state.settings, entry) && !isBlocked(state.settings, entry));
 
     if (!disabledEntries.length && !manualEntries.length) {
@@ -194,9 +196,12 @@ function renderRoot(state) {
     if (state.activeTab === 'entries') content.appendChild(renderEntriesTab(state));
     if (state.activeTab === 'preview') content.appendChild(renderPreviewTab(state));
     if (state.activeTab === 'scenarios') content.appendChild(renderScenariosTab(state));
-    shell.appendChild(content);
 
+    shell.appendChild(content);
     root.appendChild(shell);
+
+    lbgApplyUiCustomization(state);
+    lbgRestoreSearchFocus(state);
 }
 
 function renderHeader(state) {
@@ -282,26 +287,41 @@ function tabButton(state, tabName, text) {
 }
 
 function renderEntriesTab(state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+
     const fragment = document.createDocumentFragment();
-    fragment.appendChild(renderSearchPanel(state));
-    fragment.appendChild(renderTagFilterPanel(state));
-    fragment.appendChild(renderControlPanel(state));
-    fragment.appendChild(renderMemoryPanel(state));
-    fragment.appendChild(renderEntriesSection(state, true));
-    fragment.appendChild(renderEntriesSection(state, false));
+    const builders = {
+        search: () => renderSearchPanel(state),
+        tags: () => renderTagFilterPanel(state),
+        controls: () => renderControlPanel(state),
+        memory: () => renderMemoryPanel(state),
+        active: () => renderEntriesSection(state, true),
+        inactive: () => renderEntriesSection(state, false),
+    };
+
+    for (const key of lbgGetLayoutOrder(state.settings)) {
+        const build = builders[key];
+        if (!build) continue;
+        const node = build();
+        fragment.appendChild(lbgMakeLayoutDraggable(node, key, state));
+    }
+
     return fragment;
 }
 
 function renderSearchPanel(state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+
     const panel = el('div', 'lbg-toolbar lbg-panel-block lbg-search-panel');
+
     const search = el('input', 'text_pole');
     search.id = 'lbgSearch';
     search.type = 'search';
-    search.placeholder = 'Search entries, lorebooks, keys, content, tags...';
+    search.placeholder = 'Search entries...';
     search.value = state.searchQuery || '';
     search.addEventListener('input', () => {
         state.searchQuery = search.value;
-        renderRoot(state);
+        lbgRenderRootKeepingSearchFocus(state, search);
     });
 
     const sort = el('select', 'text_pole');
@@ -330,7 +350,15 @@ function renderSearchPanel(state) {
         renderRoot(state);
     });
 
-    panel.append(search, sort, view);
+    const firstRow = el('div', 'lbg-search-row');
+    firstRow.append(search, sort, view, lbgRenderGroupFilter(state));
+
+    panel.append(
+        firstRow,
+        lbgRenderSearchScopeControls(state),
+        lbgRenderUiCustomizationPanel(state)
+    );
+
     return panel;
 }
 
@@ -1009,6 +1037,8 @@ function createEntryMenuInline(entry, state) {
     customRow.append(input, add);
 
     menu.append(standardTitle, tagGrid, customRow);
+    menu.appendChild(lbgCreateGroupControls(entry, state));
+
     details.appendChild(menu);
     return details;
 }
@@ -1030,6 +1060,10 @@ function createEntryTagRow(entry, state) {
         });
         chip.appendChild(remove);
         row.appendChild(chip);
+    }
+
+    for (const groupName of lbgGetEntryGroups(state.settings, entry)) {
+        row.appendChild(lbgCreateGroupChip(groupName, false));
     }
 
     return row;
@@ -1294,13 +1328,20 @@ function deleteScenario(id) {
 }
 
 function getVisibleActiveEntries(state) {
-    return sortEntries(filterEntriesByTags(filterEntries(state.activeEntries, state), state), state.settings.sortMode, state);
+    return lbgSortEntries(
+        lbgFilterEntriesForReview(state.activeEntries, state),
+        state.settings.sortMode || 'tokens_desc',
+        state
+    );
 }
 
 function getVisibleInactiveEntries(state) {
-    let entries = filterEntries(state.inactiveEntries, state);
-    entries = filterInactiveEntriesByBook(filterEntriesByTags(entries, state), state.inactiveBookFilter);
-    return sortInactiveEntries(entries, state.settings.sortMode, state);
+    const entries = lbgFilterInactiveEntriesByBook(
+        lbgFilterEntriesForReview(state.inactiveEntries, state),
+        state.inactiveBookFilter
+    );
+
+    return lbgSortInactiveEntries(entries, state.settings.sortMode || 'tokens_desc', state);
 }
 
 function filterEntries(entries, state) {
@@ -1536,3 +1577,589 @@ function el(tagName, className = '') {
 function toStringArray(value) {
     return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
 }
+
+// LBG_FUNCTIONAL_FEATURES_START
+const LBG_GROUP_FILTER_ALL = '__all__';
+const LBG_GROUP_FILTER_UNGROUPED = '__ungrouped__';
+const LBG_DEFAULT_SEARCH_SCOPES = ['title', 'tags', 'keys', 'context'];
+const LBG_SEARCH_SCOPE_LABELS = {
+    title: 'Title',
+    tags: 'Tags',
+    keys: 'Keys',
+    context: 'Context',
+};
+const LBG_DEFAULT_LAYOUT_ORDER = ['search', 'tags', 'controls', 'memory', 'active', 'inactive'];
+
+function lbgEnsureAdvancedFeatureSettings(settings) {
+    if (!settings || typeof settings !== 'object') return;
+
+    if (!Array.isArray(settings.searchScopes) || !settings.searchScopes.length) {
+        settings.searchScopes = [...LBG_DEFAULT_SEARCH_SCOPES];
+    }
+    settings.searchScopes = settings.searchScopes.filter((scope) => LBG_DEFAULT_SEARCH_SCOPES.includes(scope));
+    if (!settings.searchScopes.length) settings.searchScopes = [...LBG_DEFAULT_SEARCH_SCOPES];
+
+    if (!settings.entryGroups || typeof settings.entryGroups !== 'object' || Array.isArray(settings.entryGroups)) {
+        settings.entryGroups = {};
+    }
+    if (!Array.isArray(settings.groupOrder)) settings.groupOrder = [];
+    if (typeof settings.groupFilter !== 'string') settings.groupFilter = LBG_GROUP_FILTER_ALL;
+
+    if (!settings.uiCustomization || typeof settings.uiCustomization !== 'object' || Array.isArray(settings.uiCustomization)) {
+        settings.uiCustomization = {};
+    }
+    const ui = settings.uiCustomization;
+    ui.fontScale = lbgClampNumber(ui.fontScale, 0.75, 1.35, 1);
+    ui.buttonScale = lbgClampNumber(ui.buttonScale, 0.75, 1.6, 1);
+    ui.entryDensity = lbgClampNumber(ui.entryDensity, 0.6, 1.5, 1);
+    ui.entryWidth = lbgClampNumber(ui.entryWidth, 55, 100, 100);
+    ui.panelWidth = lbgClampNumber(ui.panelWidth, 620, 1600, 980);
+
+    if (!Array.isArray(settings.uiLayoutOrder) || !settings.uiLayoutOrder.length) {
+        settings.uiLayoutOrder = [...LBG_DEFAULT_LAYOUT_ORDER];
+    }
+    settings.uiLayoutOrder = lbgNormalizeLayoutOrder(settings.uiLayoutOrder);
+}
+
+function lbgClampNumber(value, min, max, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, number));
+}
+
+function lbgNormalizeLayoutOrder(order) {
+    const seen = new Set();
+    const normalized = [];
+    for (const key of order || []) {
+        if (!LBG_DEFAULT_LAYOUT_ORDER.includes(key) || seen.has(key)) continue;
+        seen.add(key);
+        normalized.push(key);
+    }
+    for (const key of LBG_DEFAULT_LAYOUT_ORDER) {
+        if (!seen.has(key)) normalized.push(key);
+    }
+    return normalized;
+}
+
+function lbgGetLayoutOrder(settings) {
+    lbgEnsureAdvancedFeatureSettings(settings);
+    return [...settings.uiLayoutOrder];
+}
+
+function lbgEntryMetaId(entry) {
+    return String(entry?.stableId || entry?.id || `${entry?.bookName || ''}:${entry?.title || ''}`);
+}
+
+function lbgNormalizeGroupName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+}
+
+function lbgGetEntryGroups(settings, entry) {
+    lbgEnsureAdvancedFeatureSettings(settings);
+    const id = lbgEntryMetaId(entry);
+    return toStringArray(settings.entryGroups[id])
+        .map(lbgNormalizeGroupName)
+        .filter(Boolean)
+        .filter((group, index, groups) => groups.indexOf(group) === index);
+}
+
+function lbgSetEntryGroups(settings, entry, groups) {
+    lbgEnsureAdvancedFeatureSettings(settings);
+    const id = lbgEntryMetaId(entry);
+    const cleanGroups = toStringArray(groups)
+        .map(lbgNormalizeGroupName)
+        .filter(Boolean)
+        .filter((group, index, all) => all.indexOf(group) === index);
+
+    if (cleanGroups.length) settings.entryGroups[id] = cleanGroups;
+    else delete settings.entryGroups[id];
+
+    for (const group of cleanGroups) {
+        if (!settings.groupOrder.includes(group)) settings.groupOrder.push(group);
+    }
+}
+
+function lbgAddEntryGroup(settings, entry, groupName) {
+    const group = lbgNormalizeGroupName(groupName);
+    if (!group) return false;
+    const groups = lbgGetEntryGroups(settings, entry);
+    if (!groups.includes(group)) groups.push(group);
+    lbgSetEntryGroups(settings, entry, groups);
+    return true;
+}
+
+function lbgRemoveEntryGroup(settings, entry, groupName) {
+    const group = lbgNormalizeGroupName(groupName);
+    if (!group) return;
+    const groups = lbgGetEntryGroups(settings, entry).filter((item) => item !== group);
+    lbgSetEntryGroups(settings, entry, groups);
+}
+
+function lbgGetAllGroups(settings) {
+    lbgEnsureAdvancedFeatureSettings(settings);
+    const groups = new Set();
+    for (const group of settings.groupOrder) {
+        const normalized = lbgNormalizeGroupName(group);
+        if (normalized) groups.add(normalized);
+    }
+    for (const values of Object.values(settings.entryGroups)) {
+        for (const group of toStringArray(values)) {
+            const normalized = lbgNormalizeGroupName(group);
+            if (normalized) groups.add(normalized);
+        }
+    }
+    settings.groupOrder = [...groups];
+    return [...groups];
+}
+
+function lbgCreateGroupChip(groupName, removable, onRemove) {
+    const chip = el('span', `lbg-group-chip ${removable ? 'is-removable' : ''}`);
+    chip.textContent = `Group: ${groupName}`;
+    if (removable && typeof onRemove === 'function') {
+        const remove = button('×', 'lbg-group-remove-button');
+        remove.type = 'button';
+        remove.title = 'Remove from group';
+        remove.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemove();
+        });
+        chip.appendChild(remove);
+    }
+    return chip;
+}
+
+function lbgCreateNotice(textValue) {
+    if (typeof createNoticeElement === 'function') return createNoticeElement(textValue);
+    const notice = el('div', 'lbg-muted');
+    notice.textContent = textValue;
+    return notice;
+}
+
+function lbgCreateGroupControls(entry, state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+
+    const wrapper = el('div', 'lbg-group-menu-section');
+    const title = el('div', 'lbg-menu-section-title');
+    title.textContent = 'Groups';
+
+    const current = el('div', 'lbg-current-group-list');
+    const currentGroups = lbgGetEntryGroups(state.settings, entry);
+    if (!currentGroups.length) {
+        current.appendChild(lbgCreateNotice('No groups assigned.'));
+    } else {
+        for (const group of currentGroups) {
+            current.appendChild(lbgCreateGroupChip(group, true, () => {
+                lbgRemoveEntryGroup(state.settings, entry, group);
+                persistState(state);
+                markDirty(state, 'entries');
+                renderRoot(state);
+            }));
+        }
+    }
+
+    const allGroups = lbgGetAllGroups(state.settings).filter((group) => !currentGroups.includes(group));
+    const existingTitle = el('div', 'lbg-menu-section-title lbg-menu-section-subtitle');
+    existingTitle.textContent = 'Add existing group';
+
+    const grid = el('div', 'lbg-menu-group-grid');
+    if (!allGroups.length) {
+        grid.appendChild(lbgCreateNotice('No saved groups yet.'));
+    } else {
+        for (const group of allGroups) {
+            const addButton = button(group, 'lbg-menu-group-button');
+            addButton.addEventListener('click', () => {
+                lbgAddEntryGroup(state.settings, entry, group);
+                persistState(state);
+                markDirty(state, 'entries');
+                renderRoot(state);
+            });
+            grid.appendChild(addButton);
+        }
+    }
+
+    const customRow = el('div', 'lbg-menu-custom-row');
+    const input = el('input', 'text_pole lbg-menu-custom-input');
+    input.placeholder = 'New group';
+    const add = button('Add group', 'lbg-small-button');
+    const commit = () => {
+        if (!lbgAddEntryGroup(state.settings, entry, input.value)) return;
+        input.value = '';
+        persistState(state);
+        markDirty(state, 'entries');
+        renderRoot(state);
+    };
+    add.addEventListener('click', commit);
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+        }
+    });
+    customRow.append(input, add);
+
+    wrapper.append(title, current, existingTitle, grid, customRow);
+    return wrapper;
+}
+
+function lbgRenderGroupFilter(state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+
+    const select = el('select', 'text_pole lbg-group-filter-select');
+    select.title = 'Filter by group';
+
+    const allOption = document.createElement('option');
+    allOption.value = LBG_GROUP_FILTER_ALL;
+    allOption.textContent = 'All groups';
+    select.appendChild(allOption);
+
+    const ungroupedOption = document.createElement('option');
+    ungroupedOption.value = LBG_GROUP_FILTER_UNGROUPED;
+    ungroupedOption.textContent = 'No group';
+    select.appendChild(ungroupedOption);
+
+    for (const group of lbgGetAllGroups(state.settings)) {
+        const option = document.createElement('option');
+        option.value = group;
+        option.textContent = `Group: ${group}`;
+        select.appendChild(option);
+    }
+
+    select.value = state.settings.groupFilter || LBG_GROUP_FILTER_ALL;
+    if (![...select.options].some((option) => option.value === select.value)) {
+        select.value = LBG_GROUP_FILTER_ALL;
+        state.settings.groupFilter = LBG_GROUP_FILTER_ALL;
+    }
+
+    select.addEventListener('change', () => {
+        state.settings.groupFilter = select.value;
+        persistState(state);
+        renderRoot(state);
+    });
+
+    return select;
+}
+
+function lbgRenderSearchScopeControls(state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+
+    const wrapper = el('div', 'lbg-search-scope-row');
+    const label = el('span', 'lbg-search-scope-title');
+    label.textContent = 'Search in:';
+    wrapper.appendChild(label);
+
+    for (const scope of LBG_DEFAULT_SEARCH_SCOPES) {
+        const scopeLabel = el('label', 'lbg-search-scope-item');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = state.settings.searchScopes.includes(scope);
+        input.addEventListener('change', () => {
+            const selected = new Set(state.settings.searchScopes);
+            if (input.checked) selected.add(scope);
+            else selected.delete(scope);
+
+            if (!selected.size) {
+                selected.add(scope);
+                input.checked = true;
+            }
+
+            state.settings.searchScopes = [...selected].filter((item) => LBG_DEFAULT_SEARCH_SCOPES.includes(item));
+            persistState(state);
+            lbgRenderRootKeepingSearchFocus(state, state.root?.querySelector('#lbgSearch'));
+        });
+        scopeLabel.append(input, document.createTextNode(LBG_SEARCH_SCOPE_LABELS[scope] || scope));
+        wrapper.appendChild(scopeLabel);
+    }
+
+    return wrapper;
+}
+
+function lbgRenderUiCustomizationPanel(state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+
+    const details = el('details', 'lbg-ui-customizer');
+    const summary = el('summary', 'lbg-ui-customizer-summary');
+    summary.textContent = 'Interface settings';
+    details.appendChild(summary);
+
+    const body = el('div', 'lbg-ui-customizer-body');
+    const ui = state.settings.uiCustomization;
+
+    body.append(
+        lbgCreateRangeControl('Text size', ui.fontScale, 0.75, 1.35, 0.05, (value) => {
+            ui.fontScale = value;
+            persistState(state);
+            lbgApplyUiCustomization(state);
+        }),
+        lbgCreateRangeControl('Button size', ui.buttonScale, 0.75, 1.6, 0.05, (value) => {
+            ui.buttonScale = value;
+            persistState(state);
+            lbgApplyUiCustomization(state);
+        }),
+        lbgCreateRangeControl('Entry spacing', ui.entryDensity, 0.6, 1.5, 0.05, (value) => {
+            ui.entryDensity = value;
+            persistState(state);
+            lbgApplyUiCustomization(state);
+        }),
+        lbgCreateRangeControl('Entry width', ui.entryWidth, 55, 100, 1, (value) => {
+            ui.entryWidth = value;
+            persistState(state);
+            lbgApplyUiCustomization(state);
+        }, '%'),
+        lbgCreateRangeControl('Window width', ui.panelWidth, 620, 1600, 20, (value) => {
+            ui.panelWidth = value;
+            persistState(state);
+            lbgApplyUiCustomization(state);
+        }, 'px')
+    );
+
+    const reset = button('Reset interface', 'lbg-small-button lbg-ui-reset-button');
+    reset.addEventListener('click', () => {
+        delete state.settings.uiCustomization;
+        delete state.settings.uiLayoutOrder;
+        lbgEnsureAdvancedFeatureSettings(state.settings);
+        persistState(state);
+        renderRoot(state);
+    });
+    body.appendChild(reset);
+
+    details.appendChild(body);
+    return details;
+}
+
+function lbgCreateRangeControl(labelText, value, min, max, step, onChange, suffix = '') {
+    const row = el('label', 'lbg-ui-range-row');
+    const label = el('span', 'lbg-ui-range-label');
+    const current = el('span', 'lbg-ui-range-value');
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(min);
+    slider.max = String(max);
+    slider.step = String(step);
+    slider.value = String(value);
+
+    const updateCurrent = () => {
+        const numeric = Number(slider.value);
+        current.textContent = `${Number.isInteger(numeric) ? numeric : numeric.toFixed(2)}${suffix}`;
+    };
+    updateCurrent();
+
+    slider.addEventListener('input', () => {
+        const numeric = Number(slider.value);
+        updateCurrent();
+        if (Number.isFinite(numeric)) onChange(numeric);
+    });
+
+    label.textContent = labelText;
+    row.append(label, slider, current);
+    return row;
+}
+
+function lbgApplyUiCustomization(state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+    const shell = state.root?.querySelector('.lbg-root');
+    if (!shell) return;
+
+    const ui = state.settings.uiCustomization;
+    shell.style.setProperty('--lbg-ui-font-scale', String(ui.fontScale));
+    shell.style.setProperty('--lbg-ui-button-scale', String(ui.buttonScale));
+    shell.style.setProperty('--lbg-entry-density', String(ui.entryDensity));
+    shell.style.setProperty('--lbg-entry-width', `${ui.entryWidth}%`);
+    shell.style.setProperty('--lbg-panel-width', `${ui.panelWidth}px`);
+
+    const panel = state.root?.closest('.lbg-mobile-panel, .lbg-desktop-panel');
+    if (panel) {
+        panel.style.setProperty('--lbg-panel-width', `${ui.panelWidth}px`);
+    }
+}
+
+function lbgRenderRootKeepingSearchFocus(state, input) {
+    const value = String(input?.value || state.searchQuery || '');
+    state.lbgSearchFocus = {
+        start: Number.isFinite(input?.selectionStart) ? input.selectionStart : value.length,
+        end: Number.isFinite(input?.selectionEnd) ? input.selectionEnd : value.length,
+        scrollTop: Number(state.root?.scrollTop || 0),
+    };
+    renderRoot(state);
+}
+
+function lbgRestoreSearchFocus(state) {
+    const focusState = state.lbgSearchFocus;
+    if (!focusState) return;
+    state.lbgSearchFocus = null;
+
+    requestAnimationFrame(() => {
+        if (state.root && Number.isFinite(focusState.scrollTop)) {
+            state.root.scrollTop = focusState.scrollTop;
+        }
+
+        const search = state.root?.querySelector('#lbgSearch');
+        if (!search) return;
+        const length = String(search.value || '').length;
+        const start = Math.min(focusState.start ?? length, length);
+        const end = Math.min(focusState.end ?? start, length);
+        try {
+            search.focus({ preventScroll: true });
+            search.setSelectionRange(start, end);
+        } catch (_) {
+            search.focus();
+        }
+    });
+}
+
+function lbgMakeLayoutDraggable(node, key, state) {
+    if (!node || !key) return node;
+    node.classList.add('lbg-layout-draggable');
+    node.dataset.lbgLayoutKey = key;
+
+    const handle = el('div', 'lbg-drag-handle');
+    handle.textContent = '↕ Drag section';
+    handle.title = 'Drag to reorder interface sections';
+    handle.draggable = true;
+    node.insertBefore(handle, node.firstChild);
+
+    handle.addEventListener('dragstart', (event) => {
+        event.dataTransfer?.setData('text/plain', key);
+        node.classList.add('is-dragging');
+    });
+    handle.addEventListener('dragend', () => {
+        node.classList.remove('is-dragging');
+    });
+    node.addEventListener('dragover', (event) => {
+        event.preventDefault();
+    });
+    node.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const sourceKey = event.dataTransfer?.getData('text/plain');
+        if (!sourceKey || sourceKey === key) return;
+
+        const order = lbgGetLayoutOrder(state.settings);
+        const from = order.indexOf(sourceKey);
+        const to = order.indexOf(key);
+        if (from === -1 || to === -1) return;
+
+        order.splice(to, 0, order.splice(from, 1)[0]);
+        state.settings.uiLayoutOrder = lbgNormalizeLayoutOrder(order);
+        persistState(state);
+        renderRoot(state);
+    });
+
+    return node;
+}
+
+function lbgNormalizeSearchValue(value) {
+    return String(value || '').toLowerCase().trim();
+}
+
+function lbgEntryTextForScope(entry, state, scope) {
+    if (scope === 'title') {
+        return [entry?.title, entry?.name].filter(Boolean).join(' ');
+    }
+    if (scope === 'tags') {
+        return getEntryTags(state.settings, entry).join(' ');
+    }
+    if (scope === 'keys') {
+        const values = [
+            entry?.keys,
+            entry?.key,
+            entry?.secondaryKeys,
+            entry?.keysecondary,
+            entry?.matchedKeys,
+            entry?.matchedKeywords,
+        ];
+        if (typeof buildKeysText === 'function') values.push(buildKeysText(entry));
+        return values.map((value) => Array.isArray(value) ? value.join(' ') : String(value || '')).join(' ');
+    }
+    if (scope === 'context') {
+        const values = [entry?.content, entry?.text, entry?.comment, entry?.description];
+        if (typeof getEntryPromptContent === 'function') values.push(getEntryPromptContent(entry));
+        return values.map((value) => String(value || '')).join(' ');
+    }
+    return '';
+}
+
+function lbgEntryMatchesSearch(entry, state) {
+    const query = lbgNormalizeSearchValue(state.searchQuery);
+    if (!query) return true;
+
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+    return state.settings.searchScopes.some((scope) => {
+        const source = lbgNormalizeSearchValue(lbgEntryTextForScope(entry, state, scope));
+        return source.includes(query);
+    });
+}
+
+function lbgEntryMatchesTags(entry, state) {
+    if (!state.selectedManagerTags || !state.selectedManagerTags.size) return true;
+    const tags = new Set(getEntryTags(state.settings, entry));
+    const selected = [...state.selectedManagerTags];
+    if ((state.settings.tagFilterMode || 'any') === 'all') {
+        return selected.every((tag) => tags.has(tag));
+    }
+    return selected.some((tag) => tags.has(tag));
+}
+
+function lbgEntryMatchesGroup(entry, state) {
+    lbgEnsureAdvancedFeatureSettings(state.settings);
+    const filter = state.settings.groupFilter || LBG_GROUP_FILTER_ALL;
+    if (!filter || filter === LBG_GROUP_FILTER_ALL) return true;
+
+    const groups = lbgGetEntryGroups(state.settings, entry);
+    if (filter === LBG_GROUP_FILTER_UNGROUPED) return groups.length === 0;
+    return groups.includes(filter);
+}
+
+function lbgFilterEntriesForReview(entries, state) {
+    return [...entries].filter((entry) => (
+        lbgEntryMatchesSearch(entry, state)
+        && lbgEntryMatchesTags(entry, state)
+        && lbgEntryMatchesGroup(entry, state)
+    ));
+}
+
+function lbgFilterInactiveEntriesByBook(entries, bookFilter) {
+    if (!bookFilter || bookFilter === ALL_LOREBOOKS_FILTER) return entries;
+    return entries.filter((entry) => entry.bookName === bookFilter);
+}
+
+function lbgCompareText(a, b) {
+    return String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
+}
+
+function lbgCompareEntries(a, b, mode, state) {
+    const favoriteDiff = Number(isFavorite(state.settings, b)) - Number(isFavorite(state.settings, a));
+    if (favoriteDiff) return favoriteDiff;
+
+    if (mode === 'tokens_asc') return (a.tokens || 0) - (b.tokens || 0) || lbgCompareText(a.title, b.title);
+    if (mode === 'tokens_desc') return (b.tokens || 0) - (a.tokens || 0) || lbgCompareText(a.title, b.title);
+    if (mode === 'book') return lbgCompareText(a.bookName, b.bookName) || lbgCompareText(a.title, b.title);
+    if (mode === 'title') return lbgCompareText(a.title, b.title) || lbgCompareText(a.bookName, b.bookName);
+    return 0;
+}
+
+function lbgSortEntries(entries, mode, state) {
+    return entries
+        .map((entry, index) => ({ entry, index }))
+        .sort((left, right) => lbgCompareEntries(left.entry, right.entry, mode, state) || left.index - right.index)
+        .map((item) => item.entry);
+}
+
+function lbgSortInactiveEntries(entries, mode, state) {
+    const preferredBooks = new Set(toStringArray(state.settings.preferredInactiveBookNames));
+    return entries
+        .map((entry, index) => ({ entry, index }))
+        .sort((left, right) => {
+            const leftPreferred = preferredBooks.has(left.entry.bookName) ? 0 : 1;
+            const rightPreferred = preferredBooks.has(right.entry.bookName) ? 0 : 1;
+            return leftPreferred - rightPreferred
+                || lbgCompareEntries(left.entry, right.entry, mode, state)
+                || left.index - right.index;
+        })
+        .map((item) => item.entry);
+}
+
+function lbgIsUnlinkedConstantActiveEntry(entry) {
+    return entry?.matchType === 'unlinked-constant';
+}
+
+// LBG_FUNCTIONAL_FEATURES_END

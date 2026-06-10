@@ -1212,3 +1212,276 @@ body.lbg-edit-open {
     }
 }
 
+
+/* LBG_FUNCTIONAL_FEATURES_CSS_START */
+.lbg-mobile-panel,
+.lbg-desktop-panel {
+    width: min(var(--lbg-panel-width, 980px), calc(100vw - 16px));
+    max-width: min(var(--lbg-panel-width, 980px), calc(100vw - 16px));
+}
+
+.lbg-root.lbg-upgraded-root {
+    font-size: calc(13px * var(--lbg-ui-font-scale, 1));
+}
+
+.lbg-search-panel {
+    grid-template-columns: 1fr;
+}
+
+.lbg-search-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) repeat(3, minmax(120px, auto));
+    gap: 8px;
+    width: 100%;
+}
+
+.lbg-search-scope-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    font-size: 0.86em;
+    color: var(--SmartThemeBodyColor, #dcddd8);
+    opacity: 0.92;
+}
+
+.lbg-search-scope-title {
+    font-weight: 700;
+    opacity: 0.78;
+    margin-right: 2px;
+}
+
+.lbg-search-scope-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.035);
+    cursor: pointer;
+    user-select: none;
+}
+
+.lbg-search-scope-item input {
+    margin: 0;
+}
+
+.lbg-group-filter-select {
+    min-width: 132px;
+}
+
+.lbg-group-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(130, 170, 255, 0.35);
+    background: rgba(105, 145, 255, 0.11);
+    color: #d7e1ff;
+    font-size: 0.78em;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.lbg-group-chip.is-removable {
+    padding-right: 3px;
+}
+
+.lbg-group-remove-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    cursor: pointer;
+}
+
+.lbg-group-menu-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lbg-current-group-list,
+.lbg-menu-group-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.lbg-menu-section-subtitle {
+    margin-top: 2px;
+    opacity: 0.72;
+}
+
+.lbg-menu-group-button {
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(130, 170, 255, 0.28);
+    background: rgba(105, 145, 255, 0.08);
+    color: inherit;
+    font-size: 0.82em;
+    cursor: pointer;
+}
+
+.lbg-ui-customizer {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
+    padding: 6px 8px;
+}
+
+.lbg-ui-customizer-summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.9em;
+}
+
+.lbg-ui-customizer-body {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.lbg-ui-range-row {
+    display: grid;
+    grid-template-columns: 110px minmax(130px, 1fr) 56px;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.86em;
+}
+
+.lbg-ui-range-label {
+    opacity: 0.82;
+}
+
+.lbg-ui-range-value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.78;
+}
+
+.lbg-ui-reset-button {
+    justify-self: start;
+}
+
+.lbg-card-entry,
+.lbg-entry {
+    width: min(100%, var(--lbg-entry-width, 100%));
+    padding: calc(10px * var(--lbg-entry-density, 1)) !important;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.lbg-entry-title {
+    font-size: calc(0.84rem * var(--lbg-ui-font-scale, 1));
+}
+
+.lbg-book-badge,
+.lbg-source-badge,
+.lbg-token-badge,
+.lbg-match-badge,
+.lbg-lock-badge,
+.lbg-block-badge,
+.lbg-edit-badge,
+.lbg-filter-tag,
+.lbg-tag,
+.lbg-menu-tag-button {
+    font-size: calc(0.66rem * var(--lbg-ui-font-scale, 1)) !important;
+}
+
+.lbg-keys {
+    font-size: calc(0.62rem * var(--lbg-ui-font-scale, 1)) !important;
+}
+
+.lbg-preview,
+.lbg-prompt-preview {
+    font-size: calc(0.74rem * var(--lbg-ui-font-scale, 1));
+}
+
+.lbg-entry-menu-inline > summary {
+    font-size: calc(0.7rem * var(--lbg-ui-font-scale, 1));
+}
+
+.lbg-entry-actions {
+    grid-template-columns: repeat(4, calc(28px * var(--lbg-ui-button-scale, 1)));
+}
+
+.lbg-entry-actions button,
+.lbg-icon-button {
+    width: calc(28px * var(--lbg-ui-button-scale, 1)) !important;
+    height: calc(28px * var(--lbg-ui-button-scale, 1)) !important;
+    min-width: calc(28px * var(--lbg-ui-button-scale, 1)) !important;
+    min-height: calc(28px * var(--lbg-ui-button-scale, 1)) !important;
+}
+
+.lbg-root button,
+.lbg-root .menu_button,
+.lbg-root .lbg-small-button,
+.lbg-root .lbg-footer-button {
+    font-size: calc(1em * var(--lbg-ui-button-scale, 1));
+}
+
+.lbg-layout-draggable {
+    position: relative;
+}
+
+.lbg-layout-draggable.is-dragging {
+    opacity: 0.55;
+}
+
+.lbg-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    margin-bottom: 6px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    color: rgba(220, 221, 216, 0.62);
+    font-size: 0.76em;
+    cursor: grab;
+    user-select: none;
+}
+
+.lbg-drag-handle:active {
+    cursor: grabbing;
+}
+
+@media (max-width: 900px) {
+    .lbg-entry-actions {
+        grid-template-columns: repeat(4, calc(26px * var(--lbg-ui-button-scale, 1)));
+    }
+
+    .lbg-entry-actions button,
+    .lbg-icon-button {
+        width: calc(26px * var(--lbg-ui-button-scale, 1)) !important;
+        height: calc(26px * var(--lbg-ui-button-scale, 1)) !important;
+        min-width: calc(26px * var(--lbg-ui-button-scale, 1)) !important;
+        min-height: calc(26px * var(--lbg-ui-button-scale, 1)) !important;
+    }
+}
+
+@media (max-width: 720px) {
+    .lbg-search-row {
+        grid-template-columns: 1fr;
+    }
+
+    .lbg-ui-range-row {
+        grid-template-columns: 92px minmax(110px, 1fr) 48px;
+    }
+}
+/* LBG_FUNCTIONAL_FEATURES_CSS_END */
